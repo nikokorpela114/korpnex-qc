@@ -4,8 +4,8 @@
 //    sovellus (ja PDF/Excel-vientikirjastot) toimivat huonolla/olemattomalla
 //    kuuluvuudella työmaalla, kunhan sivu on ladattu kertaalleen netissä.
 
-const CACHE_VERSION = 'v2'
-const CACHE_NAME = `wisol-qc-${CACHE_VERSION}`
+const CACHE_VERSION = 'v3'
+const CACHE_NAME = `korpnex-qc-${CACHE_VERSION}`
 
 self.addEventListener('install', () => {
   self.skipWaiting()
@@ -74,9 +74,9 @@ self.addEventListener('fetch', event => {
 
 self.addEventListener('push', event => {
   let data = {}
-  try { data = event.data ? event.data.json() : {} } catch { data = { title: 'Wisol QC', body: event.data ? event.data.text() : '' } }
+  try { data = event.data ? event.data.json() : {} } catch { data = { title: 'Korpnex QC', body: event.data ? event.data.text() : '' } }
 
-  const title = data.title || 'Wisol QC'
+  const title = data.title || 'Korpnex QC'
   const options = {
     body: data.body || '',
     icon: data.icon || '/icon-192.png',

@@ -21,7 +21,7 @@ const CATS = [
 ]
 
 let idCounter = 0
-const DRAFT_KEY = 'wisol_qc_draft_v1'
+const DRAFT_KEY = 'korpnex_qc_draft_v1'
 
 export default function App() {
   // ?asentaja avaa karsitun asentajanäkymän tämän saman appin sisällä —
@@ -447,10 +447,10 @@ export default function App() {
     let y = 18
     const dateStr = new Date().toLocaleDateString(T.dateLocale)
 
-    doc.setFillColor(26, 47, 204)
+    doc.setFillColor(21, 96, 196)
     doc.rect(0, 0, W, 28, 'F')
     doc.setFont('helvetica', 'bold'); doc.setFontSize(13); doc.setTextColor(245, 168, 0)
-    doc.text('WISOL OY', M, 12)
+    doc.text('KORPNEX OY', M, 12)
     doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(255, 255, 255)
     doc.text(T.title, M, 19)
     doc.setFontSize(9); doc.setTextColor(180, 200, 255)
@@ -557,7 +557,7 @@ export default function App() {
       const tp0 = doc.getNumberOfPages()
       for (let p = 1; p <= tp0; p++) {
         doc.setPage(p); doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(160, 160, 160)
-        doc.text(`Wisol Oy · ${T.footer} · ${dateStr}`, M, 292)
+        doc.text(`Korpnex Oy · ${T.footer} · ${dateStr}`, M, 292)
         doc.text(`${p} / ${tp0}`, W - M, 292, { align: 'right' })
       }
       const blob0 = doc.output('blob')
@@ -641,8 +641,8 @@ export default function App() {
           mapData.inserts.forEach((ins) => {
             const tw = ins.panels * PANEL_W * sxm * kx
             const th = TABLE_D * sym * ky
-            mctx.fillStyle = 'rgba(26,47,204,0.22)'
-            mctx.strokeStyle = '#1a2fcc'
+            mctx.fillStyle = 'rgba(21,96,196,0.22)'
+            mctx.strokeStyle = '#1560c4'
             mctx.lineWidth = 0.7
             // ins.y = pöydän yläreuna (todistetusti oikea konventio)
             mctx.fillRect(px(ins.x), py(ins.y), tw, th)
@@ -652,8 +652,8 @@ export default function App() {
           // Muun wattiluokan / polygonina piirretyt paneelipöydät (665 Wp /
           // 670 Wp / Extra panels) — ks. selitys MapView.jsx:ssä/dxfParser.js:ssä.
           ;(mapData.panelAreas || []).forEach(pts => {
-            mctx.fillStyle = 'rgba(26,47,204,0.22)'
-            mctx.strokeStyle = '#1a2fcc'
+            mctx.fillStyle = 'rgba(21,96,196,0.22)'
+            mctx.strokeStyle = '#1560c4'
             mctx.lineWidth = 0.7
             mctx.beginPath(); pts.forEach(([x,y2],i) => i===0 ? mctx.moveTo(px(x),py(y2)) : mctx.lineTo(px(x),py(y2)))
             mctx.closePath(); mctx.fill(); mctx.stroke()
@@ -702,7 +702,7 @@ export default function App() {
     const tp = doc.getNumberOfPages()
     for (let p = 1; p <= tp; p++) {
       doc.setPage(p); doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(160, 160, 160)
-      doc.text(`Wisol Oy · ${T.footer} · ${dateStr}`, M, 292)
+      doc.text(`Korpnex Oy · ${T.footer} · ${dateStr}`, M, 292)
       doc.text(`${p} / ${tp}`, W - M, 292, { align: 'right' })
     }
 
@@ -733,20 +733,15 @@ export default function App() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', maxWidth: 480, margin: '0 auto' }}>
       {/* Topbar */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: 'env(safe-area-inset-top, 12px) 16px 10px', background: '#1a2fcc', position: 'sticky', top: 0, zIndex: 20 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <svg width="44" height="34" viewBox="0 0 160 115" fill="none">
-            <path d="M0,0 L22,0 L44,72 L65,18 L80,18 L101,72 L123,0 L145,0 L116,105 L94,105 L80,62 L66,105 L44,105 Z" fill="white" />
-            <path d="M24,6 L12,6 L38,78 L50,52 Z" fill="#1a2fcc" />
-            <path d="M121,6 L133,6 L107,52 L119,78 Z" fill="#1a2fcc" />
-            <circle cx="148" cy="98" r="17" fill="#f5a800" />
-          </svg>
-          <span style={{ fontSize: 19, fontWeight: 800, color: 'white', letterSpacing: 1 }}>WISOL</span>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: 'env(safe-area-inset-top, 12px) 16px 10px', background: '#070b17', position: 'sticky', top: 0, zIndex: 20 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <img src="/korpnex-icon.png" alt="Korpnex" style={{ height: 32, width: 'auto', display: 'block' }} />
+          <span style={{ fontSize: 19, fontWeight: 800, color: 'white', letterSpacing: 1 }}>KORPNEX</span>
           <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', fontWeight: 500, marginLeft: 2 }}>· Vikalista</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           {!isOnline && (
-            <span style={{ fontSize: 11, color: '#1a2fcc', fontWeight: 700, background: '#f5a800', padding: '3px 8px', borderRadius: 20 }}>⚠ Offline</span>
+            <span style={{ fontSize: 11, color: '#070b17', fontWeight: 700, background: '#f5a800', padding: '3px 8px', borderRadius: 20 }}>⚠ Offline</span>
           )}
           {syncMsg && <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.85)' }}>{syncMsg}</span>}
         </div>
@@ -786,7 +781,7 @@ export default function App() {
             <p style={{ fontSize: 13, color: '#6670a0', marginBottom: 10 }}>
               {mapError || 'Ladataan karttaa...'}
             </p>
-            <button onClick={() => fileInputRef.current.click()} style={{ background: '#1a2fcc', color: '#fff', border: 'none', borderRadius: 8, padding: '9px 20px', fontSize: 13, fontWeight: 700 }}>
+            <button onClick={() => fileInputRef.current.click()} style={{ background: '#1560c4', color: '#fff', border: 'none', borderRadius: 8, padding: '9px 20px', fontSize: 13, fontWeight: 700 }}>
               📂 Lataa DXF tälle työmaalle
             </button>
             <input ref={fileInputRef} type="file" accept=".dxf,.dwg" style={{ display: 'none' }} onChange={handleDXFUpload} />
@@ -820,7 +815,7 @@ export default function App() {
                     <span style={{ fontSize: 13, fontWeight: 600, color: '#222', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{o.cat}</span>
                   </div>
                   <div style={{ display: 'flex', gap: 10, flexShrink: 0, alignItems: 'center' }}>
-                    <button onClick={() => expandObs(o.id)} style={{ background: 'none', border: 'none', color: '#1a2fcc', fontSize: 12, fontWeight: 700 }}>Avaa</button>
+                    <button onClick={() => expandObs(o.id)} style={{ background: 'none', border: 'none', color: '#1560c4', fontSize: 12, fontWeight: 700 }}>Avaa</button>
                     <button onClick={() => removeObs(o.id)} style={{ background: 'none', border: 'none', color: '#6670a0', fontSize: 16 }}>🗑</button>
                   </div>
                 </div>
@@ -915,7 +910,7 @@ export default function App() {
                             <button onClick={() => toggleQuickAdd(o.id)} style={{ background: '#1a8a50', color: '#fff', border: 'none', borderRadius: 6, padding: '5px 10px', fontSize: 11, fontWeight: 700, flexShrink: 0 }}>Lopeta</button>
                           </div>
                         ) : (
-                          <button onClick={() => toggleQuickAdd(o.id)} style={{ width: '100%', padding: 9, border: '1px dashed #1a2fcc', borderRadius: 8, background: '#fff', color: '#1a2fcc', fontSize: 12, fontWeight: 600 }}>
+                          <button onClick={() => toggleQuickAdd(o.id)} style={{ width: '100%', padding: 9, border: '1px dashed #1560c4', borderRadius: 8, background: '#fff', color: '#1560c4', fontSize: 12, fontWeight: 600 }}>
                             📍 Pikalisää useita samalle kartalle
                           </button>
                         )}
@@ -958,7 +953,7 @@ export default function App() {
             ＋ Lisää havainto
           </button>
 
-          <button onClick={() => setAssignMode(v => !v)} style={{ width: '100%', padding: 12, border: '1px solid #d0d5e8', borderRadius: 10, background: '#fff', color: '#1a2fcc', fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+          <button onClick={() => setAssignMode(v => !v)} style={{ width: '100%', padding: 12, border: '1px solid #d0d5e8', borderRadius: 10, background: '#fff', color: '#1560c4', fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
             👷 Lähetä asentajalle {assignMode ? '▲' : '▼'}
           </button>
 
@@ -984,7 +979,7 @@ export default function App() {
                   style={{ ...inputStyle, flex: 2 }} />
                 <input placeholder="PIN" value={newInstallerPin} onChange={e => setNewInstallerPin(e.target.value.replace(/\D/g, ''))}
                   inputMode="numeric" maxLength={6} style={{ ...inputStyle, flex: 1 }} />
-                <button onClick={addInstaller} style={{ padding: '0 12px', background: '#eef0f7', border: '1px solid #d0d5e8', borderRadius: 8, color: '#1a2fcc', fontSize: 13 }}>+</button>
+                <button onClick={addInstaller} style={{ padding: '0 12px', background: '#eef0f7', border: '1px solid #d0d5e8', borderRadius: 8, color: '#1560c4', fontSize: 13 }}>+</button>
               </div>
 
               <button onClick={assignAndNotify} disabled={(!assignInstallerId && !assignTeamId) || obs.length === 0}
@@ -1007,10 +1002,10 @@ export default function App() {
           <div style={{ background: '#fff', border: '1px solid #d0d5e8', borderRadius: 8, padding: '0 14px', display: 'flex', alignItems: 'center', fontSize: 13, color: '#6670a0', whiteSpace: 'nowrap' }}>
             {obs.length === 1 ? '1 havainto' : `${obs.length} havaintoa`}
           </div>
-          <button onClick={() => exportPDF('fi')} style={{ flex: 1, padding: 12, background: '#1a2fcc', border: 'none', borderRadius: 8, color: '#fff', fontSize: 14, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+          <button onClick={() => exportPDF('fi')} style={{ flex: 1, padding: 12, background: '#1560c4', border: 'none', borderRadius: 8, color: '#fff', fontSize: 14, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
             📄 PDF FI
           </button>
-          <button onClick={() => exportPDF('en')} style={{ flex: 1, padding: 12, background: '#fff', border: '1.5px solid #1a2fcc', borderRadius: 8, color: '#1a2fcc', fontSize: 14, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+          <button onClick={() => exportPDF('en')} style={{ flex: 1, padding: 12, background: '#fff', border: '1.5px solid #1560c4', borderRadius: 8, color: '#1560c4', fontSize: 14, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
             📄 PDF EN
           </button>
         </div>
@@ -1019,10 +1014,10 @@ export default function App() {
       {/* PDF overlay */}
       {pdfMode && (
         <div style={{ position: 'fixed', inset: 0, background: '#f4f6fb', zIndex: 100, display: 'flex', flexDirection: 'column' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: 'env(safe-area-inset-top, 12px) 16px 12px', background: '#1a2fcc' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: 'env(safe-area-inset-top, 12px) 16px 12px', background: '#1560c4' }}>
             <button onClick={() => setPdfMode(false)} style={{ background: 'rgba(255,255,255,0.2)', border: 'none', color: '#fff', width: 32, height: 32, borderRadius: '50%', fontSize: 18 }}>✕</button>
             <span style={{ fontSize: 15, fontWeight: 700, color: '#fff' }}>PDF valmis</span>
-            <button onClick={sharePDF} style={{ background: '#f5a800', border: 'none', color: '#1a2fcc', fontSize: 13, fontWeight: 700, padding: '8px 16px', borderRadius: 8 }}>
+            <button onClick={sharePDF} style={{ background: '#f5a800', border: 'none', color: '#1560c4', fontSize: 13, fontWeight: 700, padding: '8px 16px', borderRadius: 8 }}>
               {shareSupported ? '⬆ Jaa' : '⬇ Lataa PDF'}
             </button>
           </div>

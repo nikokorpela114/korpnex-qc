@@ -404,9 +404,9 @@ export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, 
                 y={ins.y}
                 width={tw}
                 height={th}
-                fill="#1a2fcc"
+                fill="#1560c4"
                 fillOpacity={0.32}
-                stroke="#1a2fcc"
+                stroke="#1560c4"
                 strokeWidth={strokeW * 0.5}
               />
             )
@@ -424,9 +424,9 @@ export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, 
             <polygon
               key={`pa${i}`}
               points={pts.map(p => p.join(',')).join(' ')}
-              fill="#1a2fcc"
+              fill="#1560c4"
               fillOpacity={0.32}
-              stroke="#1a2fcc"
+              stroke="#1560c4"
               strokeWidth={strokeW * 0.5}
             />
           ))}
@@ -460,14 +460,14 @@ export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, 
             <div style={{
               position: 'absolute', left: gpsDot.x, top: gpsDot.y,
               width: 28, height: 28, borderRadius: '50%',
-              background: 'rgba(26,47,204,0.15)',
+              background: 'rgba(21,96,196,0.15)',
               transform: 'translate(-50%,-50%)',
               pointerEvents: 'none'
             }} />
             <div style={{
               position: 'absolute', left: gpsDot.x, top: gpsDot.y,
               width: 13, height: 13, borderRadius: '50%',
-              background: '#1a2fcc', border: '2.5px solid white',
+              background: '#1560c4', border: '2.5px solid white',
               boxShadow: '0 1px 5px rgba(0,0,0,0.3)',
               transform: 'translate(-50%,-50%)',
               pointerEvents: 'none'
@@ -517,9 +517,9 @@ export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, 
             style={{
               ...zoomBtnStyle,
               position: 'absolute', bottom: 8, left: 8, zIndex: 10,
-              background: followMe ? '#1a2fcc' : 'rgba(255,255,255,0.92)',
+              background: followMe ? '#1560c4' : 'rgba(255,255,255,0.92)',
               color: followMe ? '#fff' : '#333',
-              borderColor: followMe ? '#1a2fcc' : '#ccc',
+              borderColor: followMe ? '#1560c4' : '#ccc',
             }}
           >
             📍

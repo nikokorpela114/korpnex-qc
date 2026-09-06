@@ -404,8 +404,8 @@ export function renderPinMapThumb(mapData, pin, outW = 700) {
     if (right < svgX0 || left > svgX1 || ins.y + th < svgY0 || ins.y > svgY1) return // skip off-screen tables
     const tw = ins.panels * PANEL_W_M * sxm * kx, thpx = TABLE_DEPTH_M * sym * ky
     const isHi = highlightIdx.has(idx)
-    ctx.fillStyle = isHi ? 'rgba(214,48,48,0.30)' : 'rgba(26,47,204,0.18)'
-    ctx.strokeStyle = isHi ? '#d63030' : '#1a2fcc'
+    ctx.fillStyle = isHi ? 'rgba(214,48,48,0.30)' : 'rgba(21,96,196,0.18)'
+    ctx.strokeStyle = isHi ? '#d63030' : '#1560c4'
     ctx.lineWidth = isHi ? 1.4 : 0.5
     ctx.fillRect(px(ins.x), py(ins.y), tw, thpx)
     ctx.strokeRect(px(ins.x), py(ins.y), tw, thpx)
@@ -524,8 +524,8 @@ export function renderGroupMapImage(mapData, items) {
     const tw = ins.panels * PANEL_W_M * sxm * kx
     const thpx = TABLE_DEPTH_M * sym * ky
     const isHi = rowInsertIdxSet.has(idx)
-    mctx.fillStyle = isHi ? 'rgba(214,48,48,0.30)' : 'rgba(26,47,204,0.18)'
-    mctx.strokeStyle = isHi ? '#d63030' : '#1a2fcc'
+    mctx.fillStyle = isHi ? 'rgba(214,48,48,0.30)' : 'rgba(21,96,196,0.18)'
+    mctx.strokeStyle = isHi ? '#d63030' : '#1560c4'
     mctx.lineWidth = isHi ? 1.4 : 0.6
     mctx.fillRect(px(ins.x), py(ins.y), tw, thpx)
     mctx.strokeRect(px(ins.x), py(ins.y), tw, thpx)

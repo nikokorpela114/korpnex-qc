@@ -7,8 +7,8 @@ import { KNOWN_SITES, renderPinMapThumb, CAT_EN, SEV_EN, compressImage } from '.
 import { subscribeToPush, sendPushNotification } from './push.js'
 import MapView from './MapView.jsx'
 
-const SESSION_KEY = 'wisol_installer_session'
-const FIXED_BATCH_KEY_PREFIX = 'wisol_installer_fixed_batch_' // + installer id
+const SESSION_KEY = 'korpnex_installer_session'
+const FIXED_BATCH_KEY_PREFIX = 'korpnex_installer_fixed_batch_' // + installer id
 const sevBg = { Kriittinen: '#fde2e2', Huomio: '#fdf0d5', Info: '#dcefe3' }
 const sevColor = { Kriittinen: '#b02828', Huomio: '#a06800', Info: '#1a7a45' }
 
@@ -271,7 +271,8 @@ export default function InstallerView() {
     return (
       <div style={{ maxWidth: 420, margin: '0 auto', minHeight: '100vh', background: '#f4f6fb', padding: 24, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 16 }}>
         <div style={{ textAlign: 'center', marginBottom: 8 }}>
-          <div style={{ fontSize: 22, fontWeight: 800, color: '#1a2fcc' }}>WISOL</div>
+          <img src="/korpnex-icon.png" alt="Korpnex" style={{ height: 64, width: 'auto', display: 'block', margin: '0 auto 10px', borderRadius: 10 }} />
+          <div style={{ fontSize: 22, fontWeight: 800, color: '#1560c4', letterSpacing: 1 }}>KORPNEX</div>
           <div style={{ fontSize: 13, color: '#6670a0' }}>{t('login')}</div>
         </div>
         <div>
@@ -288,7 +289,7 @@ export default function InstallerView() {
             style={{ width: '100%', padding: 12, marginTop: 4, borderRadius: 8, border: '1px solid #d0d5e8', fontSize: 20, letterSpacing: 4, textAlign: 'center' }} />
         </div>
         {loginErr && <div style={{ color: '#d63030', fontSize: 13, textAlign: 'center' }}>{loginErr}</div>}
-        <button onClick={login} disabled={!selectedId || !pin} style={{ padding: 14, background: '#1a2fcc', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 700, fontSize: 15 }}>
+        <button onClick={login} disabled={!selectedId || !pin} style={{ padding: 14, background: '#1560c4', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 700, fontSize: 15 }}>
           {t('loginBtn')}
         </button>
       </div>
@@ -298,7 +299,7 @@ export default function InstallerView() {
   // --- Task list ---
   return (
     <div style={{ maxWidth: 480, margin: '0 auto', minHeight: '100vh', background: '#f4f6fb' }}>
-      <div style={{ background: '#1a2fcc', padding: '16px 16px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div style={{ background: '#1560c4', padding: '16px 16px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
           <div style={{ color: '#fff', fontWeight: 800, fontSize: 17 }}>{session.name}</div>
           <div style={{ color: 'rgba(255,255,255,0.7)', fontSize: 12 }}>{t('title')}</div>
@@ -314,7 +315,7 @@ export default function InstallerView() {
       </div>
 
       <div style={{ padding: 12 }}>
-        <button onClick={enableNotifications} style={{ width: '100%', padding: 10, background: '#fff', border: '1px solid #d0d5e8', borderRadius: 8, fontSize: 13, color: '#1a2fcc', fontWeight: 600, marginBottom: 12 }}>
+        <button onClick={enableNotifications} style={{ width: '100%', padding: 10, background: '#fff', border: '1px solid #d0d5e8', borderRadius: 8, fontSize: 13, color: '#1560c4', fontWeight: 600, marginBottom: 12 }}>
           {pushMsg || t('notifOn')}
         </button>
 
@@ -347,8 +348,8 @@ export default function InstallerView() {
               ref={el => { taskRefs.current[o.id] = el }}
               style={{
                 background: '#fff', borderRadius: 12, marginBottom: 12, overflow: 'hidden',
-                border: highlightId === o.id ? '2px solid #1a2fcc' : '1px solid #d0d5e8',
-                boxShadow: highlightId === o.id ? '0 0 0 4px rgba(26,47,204,0.15)' : 'none',
+                border: highlightId === o.id ? '2px solid #1560c4' : '1px solid #d0d5e8',
+                boxShadow: highlightId === o.id ? '0 0 0 4px rgba(21,96,196,0.15)' : 'none',
                 transition: 'box-shadow 0.3s, border-color 0.3s',
               }}
             >
@@ -381,7 +382,7 @@ export default function InstallerView() {
                       alt=""
                       style={{ width: '100%', display: 'block', borderRadius: 8, border: '2px solid #1a8a50' }}
                     />
-                    <label style={{ display: 'block', textAlign: 'center', marginTop: 6, fontSize: 12, color: '#1a2fcc', fontWeight: 600 }}>
+                    <label style={{ display: 'block', textAlign: 'center', marginTop: 6, fontSize: 12, color: '#1560c4', fontWeight: 600 }}>
                       {t('retakeFixPhoto')}
                       <input
                         type="file" accept="image/*" capture="environment"
@@ -394,7 +395,7 @@ export default function InstallerView() {
                   <label style={{
                     display: 'block', textAlign: 'center', padding: 12, marginBottom: 8,
                     border: '1.5px dashed #d0d5e8', borderRadius: 8, fontSize: 13, fontWeight: 600,
-                    color: photoBusy[o.id] ? '#9aa2c0' : '#1a2fcc', cursor: 'pointer',
+                    color: photoBusy[o.id] ? '#9aa2c0' : '#1560c4', cursor: 'pointer',
                   }}>
                     {photoBusy[o.id] ? t('compressing') : t('addFixPhoto')}
                     <input
@@ -434,7 +435,7 @@ export default function InstallerView() {
           työnjohtaja saa yhden koonti-ilmoituksen monen sijaan. */}
       {fixedBatch.length > 0 && (
         <div style={{ position: 'sticky', bottom: 0, left: 0, right: 0, padding: '10px 12px calc(10px + env(safe-area-inset-bottom, 0px))', background: 'rgba(244,246,251,0.97)', borderTop: '1px solid #d0d5e8', backdropFilter: 'blur(4px)' }}>
-          <button onClick={confirmBatch} style={{ width: '100%', padding: 13, background: '#1a2fcc', color: '#fff', border: 'none', borderRadius: 10, fontWeight: 700, fontSize: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+          <button onClick={confirmBatch} style={{ width: '100%', padding: 13, background: '#1560c4', color: '#fff', border: 'none', borderRadius: 10, fontWeight: 700, fontSize: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
             📬 {fixedBatch.length} {t('fixedCount')} — {t('confirmBatch')}
           </button>
           {confirmMsg && <div style={{ textAlign: 'center', fontSize: 12, color: '#1a8a50', fontWeight: 600, marginTop: 6 }}>{confirmMsg}</div>}

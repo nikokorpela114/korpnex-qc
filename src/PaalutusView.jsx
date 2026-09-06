@@ -7,7 +7,7 @@ import { sb } from './supabaseClient.js'
 import { latLngToTM35FIN } from './coords.js'
 import { KNOWN_SITES } from './shared.js'
 
-const SESSION_KEY = 'wisol_pile_operator_session'
+const SESSION_KEY = 'korpnex_pile_operator_session'
 // Huonompia GPS-lukemia kuin tämä (metrejä) ei käytetä sijainnin
 // päivittämiseen — ensimmäiset watchPosition-lukemat ja paneelien alla
 // otetut lukemat voivat olla kymmeniä-satoja metrejä pielessä.
@@ -160,14 +160,14 @@ function RowMiniMap({ piles, editingId, onSelect, myLocation, gpsAccuracy }) {
             const color = p.status === 'done' ? '#1a7a45' : '#999'
             return (
               <g key={p.id} onClick={() => onSelect(p)} style={{ cursor: 'pointer' }}>
-                {isEditing && <circle cx={tx(p.x)} cy={ty(p.y)} r={9} fill="none" stroke="#1a2fcc" strokeWidth={2} />}
+                {isEditing && <circle cx={tx(p.x)} cy={ty(p.y)} r={9} fill="none" stroke="#1560c4" strokeWidth={2} />}
                 {hasPullTest && <circle cx={tx(p.x)} cy={ty(p.y)} r={8} fill="none" stroke="#d63030" strokeWidth={2} />}
                 <circle cx={tx(p.x)} cy={ty(p.y)} r={5} fill={color} stroke="#fff" strokeWidth={1} />
               </g>
             )
           })}
           {editingIdx >= 0 && (
-            <text x={tx(editingPile.x)} y={ty(editingPile.y) - 13} textAnchor="middle" fontSize="11" fontWeight="bold" fill="#1a2fcc">
+            <text x={tx(editingPile.x)} y={ty(editingPile.y) - 13} textAnchor="middle" fontSize="11" fontWeight="bold" fill="#1560c4">
               #{editingIdx + 1}
             </text>
           )}
@@ -206,8 +206,8 @@ function RowMiniMap({ piles, editingId, onSelect, myLocation, gpsAccuracy }) {
             position: 'absolute', bottom: 8, right: 8, zIndex: 10,
             width: 32, height: 32, borderRadius: 7, fontSize: 15,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            border: followMe ? '1px solid #1a2fcc' : '1px solid #ccc',
-            background: followMe ? '#1a2fcc' : 'rgba(255,255,255,0.92)',
+            border: followMe ? '1px solid #1560c4' : '1px solid #ccc',
+            background: followMe ? '#1560c4' : 'rgba(255,255,255,0.92)',
             color: followMe ? '#fff' : '#333',
           }}
         >
@@ -580,7 +580,7 @@ export default function PaalutusView() {
           style={{ width: '100%', padding: 10, fontSize: 16, marginBottom: 12 }} />
         {loginErr && <div style={{ color: '#b02828', marginBottom: 12 }}>{loginErr}</div>}
         <button onClick={login} disabled={!selectedId || !pin}
-          style={{ width: '100%', padding: 12, fontSize: 16, fontWeight: 'bold', background: '#1a2fcc', color: '#fff', border: 'none', borderRadius: 8 }}>
+          style={{ width: '100%', padding: 12, fontSize: 16, fontWeight: 'bold', background: '#1560c4', color: '#fff', border: 'none', borderRadius: 8 }}>
           Kirjaudu
         </button>
       </div>
@@ -634,7 +634,7 @@ export default function PaalutusView() {
                 {editingId === p.id && (
                   <div style={{ marginTop: 10, borderTop: '1px solid #eee', paddingTop: 10 }}>
                     <button onClick={() => copyPrevious(p.id)}
-                      style={{ width: '100%', padding: 8, marginBottom: 10, fontSize: 13, background: '#eef1ff', color: '#1a2fcc', border: '1px solid #c7cdf5', borderRadius: 6 }}>
+                      style={{ width: '100%', padding: 8, marginBottom: 10, fontSize: 13, background: '#eef1ff', color: '#1560c4', border: '1px solid #c7cdf5', borderRadius: 6 }}>
                       ↺ Kopioi edellinen
                     </button>
 
@@ -681,7 +681,7 @@ export default function PaalutusView() {
         {doneCount > 0 && (
           <div style={{ position: 'fixed', left: 0, right: 0, bottom: 0, padding: 12, background: '#fff', borderTop: '1px solid #ddd' }}>
             <button onClick={exportRow}
-              style={{ width: '100%', maxWidth: 480, margin: '0 auto', display: 'block', padding: 14, fontSize: 16, fontWeight: 'bold', background: '#1a2fcc', color: '#fff', border: 'none', borderRadius: 8 }}>
+              style={{ width: '100%', maxWidth: 480, margin: '0 auto', display: 'block', padding: 14, fontSize: 16, fontWeight: 'bold', background: '#1560c4', color: '#fff', border: 'none', borderRadius: 8 }}>
               {allDone ? '📤 Rivi valmis — vie PDF + Excel' : `📤 Vie osittainen rivi (${doneCount}/${rowPiles.length}) — PDF + Excel`}
             </button>
             {!allDone && (

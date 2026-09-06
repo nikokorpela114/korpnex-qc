@@ -314,9 +314,9 @@ export default function Dashboard() {
 
   return (
     <div style={{ minHeight: '100vh', background: '#f6f7fb', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
-      <div style={{ background: 'linear-gradient(135deg, #1a2fcc, #2438e8)', padding: '20px 30px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, boxShadow: '0 2px 12px rgba(26,47,204,0.18)' }}>
+      <div style={{ background: 'linear-gradient(135deg, #1560c4, #0e8fe0)', padding: '20px 30px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, boxShadow: '0 2px 12px rgba(21,96,196,0.18)' }}>
         <div>
-          <div style={{ color: '#fff', fontWeight: 800, fontSize: 21, letterSpacing: 0.2 }}>WISOL <span style={{ opacity: 0.55, fontWeight: 500 }}>·</span> Valvomo</div>
+          <div style={{ color: '#fff', fontWeight: 800, fontSize: 21, letterSpacing: 0.2 }}>KORPNEX <span style={{ opacity: 0.55, fontWeight: 500 }}>·</span> Valvomo</div>
           <div style={{ color: 'rgba(255,255,255,0.75)', fontSize: 12.5, marginTop: 3 }}>
             {loading ? 'Ladataan…' : `Päivitetty ${lastRefresh?.toLocaleTimeString('fi-FI')} · päivittyy automaattisesti`}
           </div>
@@ -329,7 +329,7 @@ export default function Dashboard() {
       <div style={{ maxWidth: 1440, margin: '0 auto', padding: '26px 30px 70px' }}>
         {/* Yhteenveto */}
         <div style={{ display: 'flex', gap: 16, marginBottom: 26, flexWrap: 'wrap' }}>
-          <SummaryCard label="Avoimia" value={openObs.length} color="#1a2fcc" />
+          <SummaryCard label="Avoimia" value={openObs.length} color="#1560c4" />
           <SummaryCard label="Joista kriittisiä" value={totalCritical} color="#b02828" />
           <SummaryCard label="Korjattu" value={fixedObs.length} color="#1a8a50" />
           <SummaryCard label="Asentajia" value={installers.length} color="#6670a0" />
@@ -489,7 +489,7 @@ export default function Dashboard() {
                   onKeyDown={e => e.key === 'Enter' && createTeam()}
                   style={{ ...selectStyle, flex: 1 }}
                 />
-                <button onClick={createTeam} style={{ background: '#1a2fcc', color: '#fff', border: 'none', borderRadius: 8, padding: '9px 16px', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>Luo</button>
+                <button onClick={createTeam} style={{ background: '#1560c4', color: '#fff', border: 'none', borderRadius: 8, padding: '9px 16px', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>Luo</button>
               </div>
             </div>
 
@@ -537,7 +537,7 @@ export default function Dashboard() {
                   maxLength={6}
                   style={{ ...selectStyle, flex: 1 }}
                 />
-                <button onClick={addInstaller} style={{ background: '#1a2fcc', color: '#fff', border: 'none', borderRadius: 8, padding: '0 16px', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>+</button>
+                <button onClick={addInstaller} style={{ background: '#1560c4', color: '#fff', border: 'none', borderRadius: 8, padding: '0 16px', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>+</button>
               </div>
             </div>
           </div>
@@ -573,7 +573,7 @@ export default function Dashboard() {
                     maxLength={6}
                     style={{ ...selectStyle, flex: 1 }}
                   />
-                  <button onClick={addPileOperator} style={{ background: '#1a2fcc', color: '#fff', border: 'none', borderRadius: 8, padding: '0 16px', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>+</button>
+                  <button onClick={addPileOperator} style={{ background: '#1560c4', color: '#fff', border: 'none', borderRadius: 8, padding: '0 16px', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>+</button>
                 </div>
               </div>
             </div>
@@ -612,7 +612,7 @@ export default function Dashboard() {
                               onClick={() => toggleRowExpand(area, r.row_number)}
                               style={{
                                 padding: '6px 12px', borderRadius: 8, fontSize: 12.5, cursor: 'pointer',
-                                border: isOpen ? '1.5px solid #1a2fcc' : '1px solid #dfe2f0',
+                                border: isOpen ? '1.5px solid #1560c4' : '1px solid #dfe2f0',
                                 background: r.row_complete ? '#dcefe3' : '#f6f7fb',
                                 color: r.row_complete ? '#1a7a50' : '#333',
                                 fontWeight: isOpen ? 700 : 500,
@@ -634,7 +634,7 @@ export default function Dashboard() {
                             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginBottom: 8 }}>
                               <button
                                 onClick={() => downloadRowFiles(area, Number(expandedRowKey.split('__')[1]))}
-                                style={{ background: 'none', border: '1px solid #b8c0e8', color: '#1a2fcc', borderRadius: 6, padding: '5px 10px', fontSize: 12, cursor: 'pointer' }}
+                                style={{ background: 'none', border: '1px solid #b8c0e8', color: '#1560c4', borderRadius: 6, padding: '5px 10px', fontSize: 12, cursor: 'pointer' }}
                               >
                                 ⬇️ Lataa PDF + Excel
                               </button>
@@ -692,7 +692,7 @@ export default function Dashboard() {
                                       <td style={tdStyle}>{p.installed_by || '–'}</td>
                                       <td style={tdStyle}>{p.status === 'done' ? '✅' : '—'}</td>
                                       <td style={{ ...tdStyle, whiteSpace: 'nowrap' }}>
-                                        <button onClick={() => startEditPile(p)} title="Muokkaa" style={{ background: 'none', border: 'none', color: '#1a2fcc', fontSize: 13, cursor: 'pointer', padding: '2px 6px' }}>✏️</button>
+                                        <button onClick={() => startEditPile(p)} title="Muokkaa" style={{ background: 'none', border: 'none', color: '#1560c4', fontSize: 13, cursor: 'pointer', padding: '2px 6px' }}>✏️</button>
                                         <button onClick={() => resetPile(p.id)} title="Tyhjennä" style={{ background: 'none', border: 'none', color: '#b02828', fontSize: 13, cursor: 'pointer', padding: '2px 6px' }}>🗑️</button>
                                       </td>
                                     </tr>
@@ -771,7 +771,7 @@ function TeamCard({ team, installers, onDeleteTeam, onSetInstallerTeam }) {
               <option value="">+ Lisää jäsen…</option>
               {available.map(i => <option key={i.id} value={i.id}>{i.name}{i.team_id ? ' (vaihda tiimistä)' : ''}</option>)}
             </select>
-            <button onClick={addMember} disabled={!addId} style={{ background: addId ? '#1a2fcc' : '#c8cce0', color: '#fff', border: 'none', borderRadius: 8, padding: '7px 14px', fontSize: 12.5, fontWeight: 700, cursor: addId ? 'pointer' : 'default' }}>
+            <button onClick={addMember} disabled={!addId} style={{ background: addId ? '#1560c4' : '#c8cce0', color: '#fff', border: 'none', borderRadius: 8, padding: '7px 14px', fontSize: 12.5, fontWeight: 700, cursor: addId ? 'pointer' : 'default' }}>
               Lisää
             </button>
           </div>
@@ -844,7 +844,7 @@ function TabButton({ active, onClick, children }) {
       onClick={onClick}
       style={{
         padding: '7.5px 14px', borderRadius: 7, border: 'none', fontSize: 13, fontWeight: 700, cursor: 'pointer',
-        background: active ? '#1a2fcc' : 'transparent', color: active ? '#fff' : '#4a5480',
+        background: active ? '#1560c4' : 'transparent', color: active ? '#fff' : '#4a5480',
         transition: 'background 0.15s, color 0.15s',
       }}
     >

@@ -7,7 +7,7 @@
 //
 // Deploy: supabase functions deploy send-push
 // Env-muuttujat (aseta Supabasen dashboardista tai CLI:llä, ks. ohje viestissä):
-//   VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_SUBJECT (esim. mailto:sinä@wisol.fi)
+//   VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_SUBJECT (esim. mailto:sinä@korpnex.fi)
 // SUPABASE_URL ja SUPABASE_SERVICE_ROLE_KEY ovat Supabasen automaattisesti
 // tarjoamia, niitä ei tarvitse asettaa itse.
 
@@ -20,7 +20,7 @@ const supabase = createClient(
 )
 
 webpush.setVapidDetails(
-  Deno.env.get('VAPID_SUBJECT') || 'mailto:info@wisol.fi',
+  Deno.env.get('VAPID_SUBJECT') || 'mailto:info@korpnex.fi',
   Deno.env.get('VAPID_PUBLIC_KEY')!,
   Deno.env.get('VAPID_PRIVATE_KEY')!
 )
