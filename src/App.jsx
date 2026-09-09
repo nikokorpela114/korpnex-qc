@@ -8,6 +8,7 @@ import InstallerView from './InstallerView.jsx'
 import Dashboard from './Dashboard.jsx'
 import PileImport from './PileImport.jsx'
 import PaalutusView from './PaalutusView.jsx'
+import Diary from './Diary.jsx'
 import { subscribeToPush, sendPushNotification } from './push.js'
 import { ELEMENT_W_M, ELEMENT_ROW_DEPTH_M, CAT_EN, SEV_EN, PDF_STR, findPinRow, renderGroupMapImage, compressImage } from './shared.js'
 
@@ -59,6 +60,7 @@ export default function App() {
 
 function InspectorApp({ session, profile, logout }) {
   const companyId = profile.company_id
+  const [mainTab, setMainTab] = useState('vika') // 'vika' | 'paivakirja'
   const [sites, setSites] = useState([])
   const [site, setSite] = useState('') // ihmisluettava nimi (observations.site)
   const [inspector, setInspector] = useState('')
@@ -777,7 +779,7 @@ function InspectorApp({ session, profile, logout }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <img src="/korpnex-icon.png" alt="Korpnex" style={{ height: 32, width: 'auto', display: 'block' }} />
           <span style={{ fontSize: 19, fontWeight: 800, color: 'white', letterSpacing: 1 }}>KORPNEX</span>
-          <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', fontWeight: 500, marginLeft: 2 }}>· Vikalista</span>
+          <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', fontWeight: 500, marginLeft: 2 }}>· {mainTab === 'vika' ? 'Vikalista' : 'Päiväkirja'}</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           {!isOnline && (
@@ -790,6 +792,24 @@ function InspectorApp({ session, profile, logout }) {
         </div>
       </div>
 
+      {/* Tab switcher: Vikalista / Päiväkirja */}
+      <div style={{ display: 'flex', gap: 6, padding: '8px 16px', background: '#eef0f2' }}>
+        {[['vika', 'Vikalista'], ['paivakirja', '📔 Päiväkirja']].map(([val, lbl]) => {
+          const active = mainTab === val
+          return (
+            <button key={val} onClick={() => setMainTab(val)} style={{
+              flex: 1, padding: '9px 4px', borderRadius: 8, fontSize: 13, fontWeight: 700,
+              border: 'none', background: active ? '#1560c4' : 'transparent',
+              color: active ? '#fff' : '#5b6270'
+            }}>{lbl}</button>
+          )
+        })}
+      </div>
+
+      {mainTab === 'paivakirja' ? (
+        <Diary session={session} profile={profile} />
+      ) : (
+      <>
       {/* Scroll area */}
       <div style={{ flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch', paddingBottom: 90 }}>
 
@@ -1109,6 +1129,8 @@ function InspectorApp({ session, profile, logout }) {
             )}
           </div>
         </div>
+      )}
+      </>
       )}
     </div>
   )

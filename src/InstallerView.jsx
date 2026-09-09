@@ -7,6 +7,7 @@ import AuthGate from './AuthGate.jsx'
 import { renderPinMapThumb, CAT_EN, SEV_EN, compressImage } from './shared.js'
 import { subscribeToPush, sendPushNotification } from './push.js'
 import MapView from './MapView.jsx'
+import Diary from './Diary.jsx'
 
 const FIXED_BATCH_KEY_PREFIX = 'korpnex_installer_fixed_batch_' // + auth user id
 const sevBg = { Kriittinen: '#fde2e2', Huomio: '#fdf0d5', Info: '#dcefe3' }
@@ -26,6 +27,7 @@ export default function InstallerView() {
 
 function InstallerApp({ session, profile, logout }) {
   const [lang, setLang] = useState('fi')
+  const [mainTab, setMainTab] = useState('vika') // 'vika' | 'paivakirja'
   // Ensikirjautumisella luodaan automaattisesti installers-rivi jonka id =
   // auth.uid() — vanha nimi+PIN-valintaruutu on poistunut kokonaan, PIN-
   // kirjautumista ei enää ole. undefined = tarkistetaan/luodaan.
@@ -373,6 +375,24 @@ function InstallerApp({ session, profile, logout }) {
         </div>
       </div>
 
+      {/* Tab switcher: Tehtävät / Päiväkirja */}
+      <div style={{ display: 'flex', gap: 6, padding: '8px 12px', background: '#eef0f2' }}>
+        {[['vika', t('title')], ['paivakirja', '📔 Päiväkirja']].map(([val, lbl]) => {
+          const active = mainTab === val
+          return (
+            <button key={val} onClick={() => setMainTab(val)} style={{
+              flex: 1, padding: '9px 4px', borderRadius: 8, fontSize: 13, fontWeight: 700,
+              border: 'none', background: active ? '#1560c4' : 'transparent',
+              color: active ? '#fff' : '#5b6270'
+            }}>{lbl}</button>
+          )
+        })}
+      </div>
+
+      {mainTab === 'paivakirja' ? (
+        <Diary session={session} profile={profile} />
+      ) : (
+      <>
       <div style={{ padding: 12 }}>
         <button onClick={enableNotifications} style={{ width: '100%', padding: 10, background: '#fff', border: '1px solid #d0d5e8', borderRadius: 8, fontSize: 13, color: '#1560c4', fontWeight: 600, marginBottom: 8 }}>
           {pushMsg || t('notifOn')}
@@ -566,6 +586,8 @@ function InstallerApp({ session, profile, logout }) {
           </button>
           {confirmMsg && <div style={{ textAlign: 'center', fontSize: 12, color: '#1a8a50', fontWeight: 600, marginTop: 6 }}>{confirmMsg}</div>}
         </div>
+      )}
+      </>
       )}
     </div>
   )
