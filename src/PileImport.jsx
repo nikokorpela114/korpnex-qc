@@ -105,13 +105,19 @@ function PileImportApp({ profile, logout }) {
   }
 
   return (
-    <div style={{ maxWidth: 480, margin: '0 auto', padding: 20, fontFamily: 'sans-serif' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h2 style={{ margin: 0 }}>Paalujen tuonti DXF:stä</h2>
-        <button onClick={logout} style={{ padding: '6px 10px', border: '1px solid #ccc', borderRadius: 6, background: '#fff', fontSize: 13 }}>
+    <div style={{ maxWidth: 480, margin: '0 auto', fontFamily: 'sans-serif' }}>
+      <div style={{ background: '#070b17', padding: '16px 16px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <img src="/korpnex-icon.png" alt="Korpnex" style={{ height: 32, width: 'auto', display: 'block' }} />
+          <span style={{ fontSize: 19, fontWeight: 800, color: '#fff', letterSpacing: 1 }}>KORPNEX</span>
+          <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', fontWeight: 500, marginLeft: 2 }}>· Paalutuonti</span>
+        </div>
+        <button onClick={logout} style={{ background: 'rgba(255,255,255,0.12)', border: 'none', color: 'rgba(255,255,255,0.85)', borderRadius: 6, padding: '5px 9px', fontSize: 12 }}>
           Kirjaudu ulos
         </button>
       </div>
+      <div style={{ padding: '0 20px 20px' }}>
+      <h2 style={{ margin: '0 0 8px', fontSize: 17 }}>Paalujen tuonti DXF:stä</h2>
       <p style={{ color: '#666', fontSize: 14 }}>
         Lukee valitun työmaan paalu-CSV:n Storagesta (bucket "maps") — CSV
         sisältää jo valmiin alue- ja rivijaon — ja tallentaa/päivittää ne
@@ -148,6 +154,7 @@ function PileImportApp({ profile, logout }) {
         fontSize: 13, fontFamily: 'monospace', maxHeight: 400, overflowY: 'auto', whiteSpace: 'pre-wrap'
       }}>
         {log.length === 0 ? 'Loki näkyy tässä...' : log.join('\n')}
+      </div>
       </div>
     </div>
   )

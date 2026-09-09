@@ -705,14 +705,22 @@ function PaalutusApp({ session, profile, logout }) {
   // --- Aluevalintanäkymä ---
   if (selectedArea == null) {
     return (
-      <div style={{ maxWidth: 480, margin: '0 auto', padding: 16, fontFamily: 'sans-serif' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-          <h2 style={{ margin: 0 }}>Paalutus — {operator.name}</h2>
-          <button onClick={logout} style={{ padding: '6px 10px', border: '1px solid #ccc', borderRadius: 6, background: '#fff', fontSize: 13 }}>
+      <div style={{ maxWidth: 480, margin: '0 auto', fontFamily: 'sans-serif' }}>
+        <div style={{ background: '#070b17', padding: '16px 16px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <img src="/korpnex-icon.png" alt="Korpnex" style={{ height: 32, width: 'auto', display: 'block' }} />
+              <span style={{ fontSize: 19, fontWeight: 800, color: '#fff', letterSpacing: 1 }}>KORPNEX</span>
+              <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', fontWeight: 500, marginLeft: 2 }}>· Paalutus</span>
+            </div>
+            <div style={{ color: 'rgba(255,255,255,0.6)', fontSize: 12, marginLeft: 40 }}>{operator.name}</div>
+          </div>
+          <button onClick={logout} style={{ background: 'rgba(255,255,255,0.12)', border: 'none', color: 'rgba(255,255,255,0.85)', borderRadius: 6, padding: '5px 9px', fontSize: 12 }}>
             Kirjaudu ulos
           </button>
         </div>
 
+        <div style={{ padding: '0 16px' }}>
         <select value={siteId} onChange={e => setSiteId(e.target.value)}
           style={{ width: '100%', padding: 8, fontSize: 15, marginBottom: 12 }}>
           {sites.length === 0 && <option value="">Ei työmaita</option>}
@@ -738,6 +746,7 @@ function PaalutusApp({ session, profile, logout }) {
             )
           })
         }
+        </div>
       </div>
     )
   }
