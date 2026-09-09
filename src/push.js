@@ -1,12 +1,6 @@
 // src/push.js
 import { sb } from './supabaseClient'
 
-const SUPABASE_FUNCTIONS_URL = 'https://ddgsbamrafhasrtsrsyv.supabase.co/functions/v1/send-push'
-// Sama julkinen anon-avain kuin supabaseClient.js:ssä — Edge Function vaatii
-// tämän Authorization-otsikossa oletuksena, muuten Supabase hylkää koko
-// pyynnön 401:llä ennen kuin se pääsee funktion koodiin asti.
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRkZ3NiYW1yYWZoYXNydHNyc3l2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIyODU2MzUsImV4cCI6MjA5Nzg2MTYzNX0.gsbIu5yAUA_iINCGF20p4bSAWJCaEN6UXi8_OlGC3Oc'
-
 // TÄRKEÄÄ: korvaa tämä sillä VAPID_PUBLIC_KEY-arvolla jonka sait — tämä on
 // julkinen avain, se on turvallista pitää selainkoodissa.
 export const VAPID_PUBLIC_KEY = 'BFayLujytsUxr9kvsNwWpiFBDBUzMs80iN5TM5zKup5S6PFyXx9Q-f8sgPe6nFtFTTe7PsBkDQCUczzTpK6nxgM'
@@ -21,7 +15,12 @@ function urlBase64ToUint8Array(base64String) {
 // Pyytää ilmoitusluvan, rekisteröi Service Workerin, tilaa pushin ja
 // tallentaa tilauksen Supabaseen. Palauttaa true/false onnistumisesta.
 // role: 'installer' | 'supervisor'. installerId: pakollinen jos role==='installer'.
-export async function subscribeToPush(role, installerId = null) {
+// companyId: PAKOLLINEN moniyritysversiossa — ilman sitä RLS estäisi rivin
+// tallennuksen (push_subscriptions.company_id täytyy täsmätä kirjautuneen
+// käyttäjän omaan yritykseen, ks. multi_tenant_schema.sql). Tämä samalla
+// varmistaa että send-push-funktio voi rajata ilmoitukset oikeaan yritykseen
+// eivätkä eri yritysten ilmoitukset koskaan mene ristiin.
+export async function subscribeToPush(role, installerId = null, companyId = null) {
   if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
     return { ok: false, reason: 'Selain ei tue push-ilmoituksia' }
   }
@@ -49,9 +48,10 @@ export async function subscribeToPush(role, installerId = null) {
       .maybeSingle()
 
     if (!existing) {
-      await sb.from('push_subscriptions').insert([{
-        role, installer_id: installerId, subscription: sub.toJSON(),
+      const { error } = await sb.from('push_subscriptions').insert([{
+        role, installer_id: installerId, company_id: companyId, subscription: sub.toJSON(),
       }])
+      if (error) return { ok: false, reason: error.message }
     }
 
     return { ok: true }
@@ -76,25 +76,31 @@ export async function getPushStatus() {
   }
 }
 
-// Kutsuu Edge Functionia joka oikeasti lähettää ilmoitukset. Kutsutaan
-// työnjohtajan sovelluksesta kun havaintoja lähetetään asentajalle, ja
-// asentajan sovelluksesta kun havainto merkitään korjatuksi.
+// Kutsuu send-push-Edge Functionia joka oikeasti lähettää ilmoitukset.
+// Kutsutaan työnjohtajan sovelluksesta kun havaintoja lähetetään
+// asentajalle, ja asentajan sovelluksesta kun havainto merkitään korjatuksi.
+//
+// HUOM (moniyritysversio): tämä kutsutaan nyt sb.functions.invoke:lla
+// (aiemmin suora fetch + kovakoodattu anon-avain) — supabase-js liittää
+// automaattisesti kirjautuneen käyttäjän istunnon tokenin mukaan.
+// send-push-funktio TARKISTAA tämän tokenin ja rajaa ilmoitukset AINA
+// kutsujan omaan yritykseen palvelinpäässä — se ei koskaan luota tähän
+// mahdollisesti annettuun companyId-arvoon, joten yritysten väliset
+// ilmoitusvuodot eivät ole mahdollisia vaikka kutsuva koodi olisi väärässä.
 export async function sendPushNotification({ role, installerId = null, title, body = '', url = '/', tag }) {
   try {
-    const res = await fetch(SUPABASE_FUNCTIONS_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-      },
-      body: JSON.stringify({ role, installer_id: installerId, title, body, url, tag }),
+    const { data, error } = await sb.functions.invoke('send-push', {
+      body: { role, installer_id: installerId, title, body, url, tag },
     })
-    if (!res.ok) {
-      const text = await res.text().catch(() => '')
-      console.error('sendPushNotification: HTTP', res.status, text)
-      return { error: `HTTP ${res.status}`, detail: text }
+    if (error) {
+      console.error('sendPushNotification failed:', error)
+      return { error: error.message }
     }
-    return await res.json()
+    if (data?.error) {
+      console.error('sendPushNotification: server error', data.error)
+      return data
+    }
+    return data
   } catch (e) {
     console.error('sendPushNotification failed:', e)
     return { error: e.message }

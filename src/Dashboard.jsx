@@ -4,186 +4,34 @@
 // Avataan osoitteesta /?valvomo (sama reititysperiaate kuin /?asentaja).
 import React, { useState, useEffect, useMemo, useCallback } from 'react'
 import { sb } from './supabaseClient.js'
-import { KNOWN_SITES } from './shared.js'
+import AuthGate from './AuthGate.jsx'
 import { typeLabel, extraLabel, PILE_TYPES, EXTRA_ACTIONS, buildRowExportFiles, orderPilesAlongRow } from './PaalutusView.jsx'
 
 const sevColor = { Kriittinen: '#b02828', Huomio: '#a06800', Info: '#1a7a45' }
 const sevBg = { Kriittinen: '#fde2e2', Huomio: '#fdf0d5', Info: '#dcefe3' }
 const REFRESH_MS = 30000
+const ROLE_LABEL = { admin: 'Ylläpitäjä', asentaja: 'Asentaja', paaluttaja: 'Paaluttaja' }
 
-// Valvomon kirjautumisportti: Supabase Auth (sähköposti + salasana).
-// Tämä EI koske kenttäsovelluksen (asentaja/paalutus) omaa nimi+PIN-
-// kirjautumista eikä muuta observations/installers/teams-taulujen anon-
-// oikeuksia — se on vain käyttöliittymän portti Valvomon eteen. Käyttäjät
-// (työnjohtajat/valvojat) luodaan Supabasen Dashboard → Authentication →
-// Users -sivulta ("Add user", "Auto Confirm User" päälle).
-function AuthGate({ children }) {
-  const [session, setSession] = useState(undefined) // undefined = tarkistetaan, null = ei kirjautunut
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [err, setErr] = useState('')
-  const [busy, setBusy] = useState(false)
-  // 'login' | 'forgot' (salasanan palautuslinkin pyyntö) | 'recovery' (palautuslinkistä
-  // palattiin tänne — Supabase on jo asettanut väliaikaisen istunnon, tässä
-  // tilassa käyttäjä asettaa uuden salasanan ennen kuin pääsee sisään)
-  const [mode, setMode] = useState('login')
-  const [forgotMsg, setForgotMsg] = useState('')
-  const [newPw, setNewPw] = useState('')
-  const [newPw2, setNewPw2] = useState('')
-  const [pwSavedMsg, setPwSavedMsg] = useState('')
-
-  useEffect(() => {
-    sb.auth.getSession().then(({ data }) => setSession(data.session || null))
-    // PASSWORD_RECOVERY: käyttäjä tuli tähän sivuun sähköpostin palautuslinkistä.
-    // Supabase-js on jo lukenut linkin mukana tulleen tokenin URL:sta ja
-    // asettanut väliaikaisen istunnon automaattisesti — ei näytetä Valvomoa
-    // vielä, vaan pyydetään ensin uusi salasana (updateUser tarvitsee tämän
-    // istunnon toimiakseen).
-    const { data: sub } = sb.auth.onAuthStateChange((event, s) => {
-      if (event === 'PASSWORD_RECOVERY') setMode('recovery')
-      setSession(s)
-    })
-    return () => sub.subscription.unsubscribe()
-  }, [])
-
-  async function login() {
-    setErr(''); setBusy(true)
-    const { error } = await sb.auth.signInWithPassword({ email: email.trim(), password })
-    setBusy(false)
-    if (error) setErr(error.message === 'Invalid login credentials' ? 'Väärä sähköposti tai salasana' : error.message)
-  }
-
-  async function sendReset() {
-    setErr(''); setForgotMsg(''); setBusy(true)
-    const { error } = await sb.auth.resetPasswordForEmail(email.trim(), {
-      redirectTo: window.location.origin + '/?valvomo',
-    })
-    setBusy(false)
-    if (error) setErr(error.message)
-    else setForgotMsg('✓ Palautuslinkki lähetetty sähköpostiin, jos tili on olemassa.')
-  }
-
-  async function saveNewPassword() {
-    setErr('')
-    if (newPw.length < 6) { setErr('Salasanan pitää olla vähintään 6 merkkiä'); return }
-    if (newPw !== newPw2) { setErr('Salasanat eivät täsmää'); return }
-    setBusy(true)
-    const { error } = await sb.auth.updateUser({ password: newPw })
-    setBusy(false)
-    if (error) { setErr(error.message); return }
-    setPwSavedMsg('✓ Salasana vaihdettu')
-    setMode('login')
-  }
-
-  if (session === undefined) {
-    return <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6670a0', fontFamily: 'system-ui, -apple-system, sans-serif' }}>Ladataan…</div>
-  }
-
-  if (mode === 'recovery') {
-    return (
-      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f6f7fb', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
-        <div style={{ background: '#fff', borderRadius: 14, boxShadow: '0 4px 24px rgba(20,30,80,0.10)', padding: 32, width: 340 }}>
-          <div style={{ textAlign: 'center', marginBottom: 18 }}>
-            <div style={{ fontSize: 17, fontWeight: 800, color: '#1560c4' }}>Aseta uusi salasana</div>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <input
-              type="password" placeholder="Uusi salasana" value={newPw} onChange={e => setNewPw(e.target.value)}
-              style={{ padding: 11, borderRadius: 8, border: '1px solid #d0d5e8', fontSize: 14 }}
-            />
-            <input
-              type="password" placeholder="Uusi salasana (uudelleen)" value={newPw2} onChange={e => setNewPw2(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && saveNewPassword()}
-              style={{ padding: 11, borderRadius: 8, border: '1px solid #d0d5e8', fontSize: 14 }}
-            />
-            {err && <div style={{ color: '#d63030', fontSize: 12.5, textAlign: 'center' }}>{err}</div>}
-            <button onClick={saveNewPassword} disabled={busy || !newPw || !newPw2} style={{
-              padding: 12, background: busy ? '#9aa2c0' : '#1560c4', color: '#fff', border: 'none',
-              borderRadius: 8, fontWeight: 700, fontSize: 14, cursor: busy ? 'default' : 'pointer', marginTop: 4,
-            }}>
-              {busy ? 'Tallennetaan…' : 'Tallenna uusi salasana'}
-            </button>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
-  if (!session) {
-    return (
-      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f6f7fb', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
-        <div style={{ background: '#fff', borderRadius: 14, boxShadow: '0 4px 24px rgba(20,30,80,0.10)', padding: 32, width: 340 }}>
-          <div style={{ textAlign: 'center', marginBottom: 18 }}>
-            <img src="/korpnex-icon.png" alt="Korpnex" style={{ height: 52, width: 'auto', display: 'block', margin: '0 auto 10px', borderRadius: 10 }} />
-            <div style={{ fontSize: 19, fontWeight: 800, color: '#1560c4', letterSpacing: 0.5 }}>KORPNEX <span style={{ opacity: 0.5, fontWeight: 500 }}>·</span> Valvomo</div>
-          </div>
-
-          {mode === 'login' ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {pwSavedMsg && <div style={{ color: '#1a8a50', fontSize: 12.5, textAlign: 'center', fontWeight: 700 }}>{pwSavedMsg}</div>}
-              <input
-                type="email" placeholder="Sähköposti" value={email} onChange={e => setEmail(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && login()}
-                style={{ padding: 11, borderRadius: 8, border: '1px solid #d0d5e8', fontSize: 14 }}
-              />
-              <input
-                type="password" placeholder="Salasana" value={password} onChange={e => setPassword(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && login()}
-                style={{ padding: 11, borderRadius: 8, border: '1px solid #d0d5e8', fontSize: 14 }}
-              />
-              {err && <div style={{ color: '#d63030', fontSize: 12.5, textAlign: 'center' }}>{err}</div>}
-              <button onClick={login} disabled={busy || !email || !password} style={{
-                padding: 12, background: busy ? '#9aa2c0' : '#1560c4', color: '#fff', border: 'none',
-                borderRadius: 8, fontWeight: 700, fontSize: 14, cursor: busy ? 'default' : 'pointer', marginTop: 4,
-              }}>
-                {busy ? 'Kirjaudutaan…' : 'Kirjaudu'}
-              </button>
-              <button
-                onClick={() => { setMode('forgot'); setErr(''); setForgotMsg('') }}
-                style={{ background: 'none', border: 'none', color: '#6670a0', fontSize: 12.5, cursor: 'pointer', marginTop: 2 }}
-              >
-                Unohtuiko salasana?
-              </button>
-            </div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <div style={{ fontSize: 12.5, color: '#6670a0', marginBottom: 2 }}>
-                Anna sähköpostiosoitteesi — lähetämme siihen linkin, jolla voit asettaa uuden salasanan.
-              </div>
-              <input
-                type="email" placeholder="Sähköposti" value={email} onChange={e => setEmail(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && sendReset()}
-                style={{ padding: 11, borderRadius: 8, border: '1px solid #d0d5e8', fontSize: 14 }}
-              />
-              {err && <div style={{ color: '#d63030', fontSize: 12.5, textAlign: 'center' }}>{err}</div>}
-              {forgotMsg && <div style={{ color: '#1a8a50', fontSize: 12.5, textAlign: 'center', fontWeight: 700 }}>{forgotMsg}</div>}
-              <button onClick={sendReset} disabled={busy || !email} style={{
-                padding: 12, background: busy ? '#9aa2c0' : '#1560c4', color: '#fff', border: 'none',
-                borderRadius: 8, fontWeight: 700, fontSize: 14, cursor: busy ? 'default' : 'pointer', marginTop: 4,
-              }}>
-                {busy ? 'Lähetetään…' : 'Lähetä palautuslinkki'}
-              </button>
-              <button
-                onClick={() => { setMode('login'); setErr('') }}
-                style={{ background: 'none', border: 'none', color: '#6670a0', fontSize: 12.5, cursor: 'pointer', marginTop: 2 }}
-              >
-                ← Takaisin kirjautumiseen
-              </button>
-            </div>
-          )}
-        </div>
-      </div>
-    )
-  }
-
-  return children(session)
-}
-
+// Valvomon kirjautuminen hoidetaan jaetulla AuthGate-komponentilla
+// (src/AuthGate.jsx) — sama komponentti hoitaa myös asentaja/paalutus-
+// näkymien kirjautumisen. allowedRoles=['admin'] tarkoittaa että vain
+// pääkäyttäjä-roolin tilit pääsevät Valvomoon; muun roolin tilit näkevät
+// AuthGaten "väärä rooli" -ilmoituksen.
 export default function Dashboard() {
-  return <AuthGate>{session => <DashboardInner session={session} />}</AuthGate>
+  return (
+    <AuthGate allowedRoles={['admin']} title="Valvomo">
+      {({ session, profile, logout }) => <DashboardInner session={session} profile={profile} logout={logout} />}
+    </AuthGate>
+  )
 }
 
-function DashboardInner({ session }) {
+function DashboardInner({ session, profile, logout }) {
+  const companyId = profile.company_id
+  const [company, setCompany] = useState(null)
+  const [editingCompanyName, setEditingCompanyName] = useState(false)
+  const [companyNameInput, setCompanyNameInput] = useState('')
+  const [sites, setSites] = useState([])
+  const [newSiteLabel, setNewSiteLabel] = useState('')
   const [obs, setObs] = useState([])
   const [installers, setInstallers] = useState([])
   const [teams, setTeams] = useState([])
@@ -197,27 +45,24 @@ function DashboardInner({ session }) {
   const [selected, setSelected] = useState(new Set())
   const [busy, setBusy] = useState(false)
   const [newTeamName, setNewTeamName] = useState('')
-  const [newInstallerName, setNewInstallerName] = useState('')
-  const [newInstallerPin, setNewInstallerPin] = useState('')
   const [lightboxSrc, setLightboxSrc] = useState(null) // korjauskuvan suurennettu näkymä
 
   // --- Urakoitsijat-välilehden tila ---
   const [newContractorName, setNewContractorName] = useState('')
   const [selectedContractorId, setSelectedContractorId] = useState('')
 
-  // --- Käyttäjät-välilehden tila (Valvomon omat sähköposti+salasana-tunnukset) ---
-  const [valvomoUsers, setValvomoUsers] = useState([])
+  // --- Käyttäjät-välilehden tila (yrityksen omat sähköposti+salasana-tunnukset) ---
+  const [companyUsers, setCompanyUsers] = useState([])
   const [usersLoading, setUsersLoading] = useState(false)
   const [userErr, setUserErr] = useState('')
   const [newUserEmail, setNewUserEmail] = useState('')
   const [newUserPassword, setNewUserPassword] = useState('')
+  const [newUserRole, setNewUserRole] = useState('asentaja')
 
   // --- Paalutus-välilehden tila ---
   const [pileOperators, setPileOperators] = useState([])
   const [pileRowSummary, setPileRowSummary] = useState([])
   const [pileSiteFilter, setPileSiteFilter] = useState('')
-  const [newPileOpName, setNewPileOpName] = useState('')
-  const [newPileOpPin, setNewPileOpPin] = useState('')
   const [expandedRowKey, setExpandedRowKey] = useState(null)
   const [expandedRowPiles, setExpandedRowPiles] = useState(null)
   const [editPileId, setEditPileId] = useState(null)
@@ -226,13 +71,19 @@ function DashboardInner({ session }) {
   const [editPileKn, setEditPileKn] = useState('')
 
   const load = useCallback(async () => {
-    const [{ data: o, error: oErr }, { data: i, error: iErr }, { data: tm, error: tErr }, { data: po, error: poErr }, { data: prs, error: prsErr }, { data: co, error: cErr }] = await Promise.all([
+    const [
+      { data: o, error: oErr }, { data: i, error: iErr }, { data: tm, error: tErr },
+      { data: po, error: poErr }, { data: prs, error: prsErr }, { data: co, error: cErr },
+      { data: st, error: stErr }, { data: cmp, error: cmpErr },
+    ] = await Promise.all([
       sb.from('observations').select('*').order('created_at', { ascending: false }).limit(3000),
       sb.from('installers').select('*').order('name'),
       sb.from('teams').select('*').order('name'),
       sb.from('pile_operators').select('*').order('name'),
       sb.from('pile_rows_summary').select('*').order('area').order('row_number'),
       sb.from('contractors').select('*').order('name'),
+      sb.from('sites').select('*').order('label'),
+      sb.from('companies').select('*').eq('id', companyId).maybeSingle(),
     ])
     if (oErr) console.error('Dashboard: observations fetch failed', oErr)
     if (iErr) console.error('Dashboard: installers fetch failed', iErr)
@@ -240,15 +91,20 @@ function DashboardInner({ session }) {
     if (poErr) console.error('Dashboard: pile_operators fetch failed', poErr)
     if (prsErr) console.error('Dashboard: pile_rows_summary fetch failed', prsErr)
     if (cErr) console.error('Dashboard: contractors fetch failed', cErr)
+    if (stErr) console.error('Dashboard: sites fetch failed', stErr)
+    if (cmpErr) console.error('Dashboard: company fetch failed', cmpErr)
     setObs(o || [])
     setInstallers(i || [])
     setTeams(tm || [])
     setPileOperators(po || [])
     setPileRowSummary(prs || [])
     setContractors(co || [])
+    setSites(st || [])
+    setCompany(cmp || null)
+    setPileSiteFilter(prev => prev || st?.[0]?.id || '')
     setLoading(false)
     setLastRefresh(new Date())
-  }, [])
+  }, [companyId])
 
   useEffect(() => {
     load()
@@ -393,7 +249,7 @@ function DashboardInner({ session }) {
   async function createTeam() {
     const name = newTeamName.trim()
     if (!name) return
-    const { error } = await sb.from('teams').insert([{ name }])
+    const { error } = await sb.from('teams').insert([{ name, company_id: companyId }])
     if (error) { alert('Tiimin luonti epäonnistui: ' + error.message); return }
     setNewTeamName('')
     load()
@@ -404,11 +260,38 @@ function DashboardInner({ session }) {
     if (error) { alert('Poisto epäonnistui: ' + error.message); return }
     load()
   }
+
+  // --- Yrityksen nimi ---
+  async function saveCompanyName() {
+    const name = companyNameInput.trim()
+    if (!name) return
+    const { data, error } = await sb.from('companies').update({ name }).eq('id', companyId).select().maybeSingle()
+    if (error) { alert('Tallennus epäonnistui: ' + error.message); return }
+    setCompany(data)
+    setEditingCompanyName(false)
+  }
+
+  // --- Työmaat ---
+  async function createSite() {
+    const label = newSiteLabel.trim()
+    if (!label) return
+    const { error } = await sb.from('sites').insert([{ label, company_id: companyId }])
+    if (error) { alert('Työmaan luonti epäonnistui: ' + error.message); return }
+    setNewSiteLabel('')
+    load()
+  }
+  async function deleteSite(id) {
+    if (!window.confirm('Poistetaanko työmaa? Sen kartta/DXF ja paalutiedot eivät poistu automaattisesti.')) return
+    const { error } = await sb.from('sites').delete().eq('id', id)
+    if (error) { alert('Poisto epäonnistui: ' + error.message); return }
+    load()
+  }
+
   // --- Urakoitsijat ---
   async function createContractor() {
     const name = newContractorName.trim()
     if (!name) return
-    const { error } = await sb.from('contractors').insert([{ name }])
+    const { error } = await sb.from('contractors').insert([{ name, company_id: companyId }])
     if (error) { alert('Urakoitsijan luonti epäonnistui: ' + error.message + '\n\nJos virhe mainitsee taulun puuttumisen, aja contractors_schema.sql Supabasen SQL Editorissa.'); return }
     setNewContractorName('')
     load()
@@ -433,30 +316,32 @@ function DashboardInner({ session }) {
     load()
   }
 
-  // --- Valvomon käyttäjät (Supabase Auth) — hoidetaan manage-valvomo-users
+  // --- Yrityksen käyttäjät (Supabase Auth) — hoidetaan manage-company-users
   // Edge Functionin kautta, koska käyttäjän luonti/poisto vaatii
   // service_role-oikeudet, joita ei koskaan saa laittaa selaimeen. Funktio
-  // tarkistaa itse että kutsuja on jo kirjautunut Valvomon käyttäjä.
+  // tarkistaa itse että kutsuja on oman yrityksen admin, ja rajaa kaikki
+  // toiminnot AINA kutsujan omaan yritykseen — muiden yritysten käyttäjiä
+  // ei näy eikä voi hallita täältä.
   async function loadUsers() {
     setUsersLoading(true); setUserErr('')
-    const { data, error } = await sb.functions.invoke('manage-valvomo-users', { body: { action: 'list' } })
+    const { data, error } = await sb.functions.invoke('manage-company-users', { body: { action: 'list' } })
     setUsersLoading(false)
     if (error || data?.error) { setUserErr(data?.error || error.message); return }
-    setValvomoUsers(data.users || [])
+    setCompanyUsers(data.users || [])
   }
   async function createUser() {
     const emailVal = newUserEmail.trim(), pwVal = newUserPassword
     if (!emailVal || pwVal.length < 6) { setUserErr('Anna sähköposti ja vähintään 6 merkin salasana.'); return }
     setUserErr('')
-    const { data, error } = await sb.functions.invoke('manage-valvomo-users', { body: { action: 'create', email: emailVal, password: pwVal } })
+    const { data, error } = await sb.functions.invoke('manage-company-users', { body: { action: 'create', email: emailVal, password: pwVal, role: newUserRole } })
     if (error || data?.error) { setUserErr(data?.error || error.message); return }
     setNewUserEmail(''); setNewUserPassword('')
     loadUsers()
   }
   async function deleteUser(u) {
-    if (!window.confirm(`Poistetaanko käyttäjä ${u.email}? Hän ei pääse enää kirjautumaan Valvomoon.`)) return
+    if (!window.confirm(`Poistetaanko käyttäjä ${u.email}? Hän ei pääse enää kirjautumaan.`)) return
     setUserErr('')
-    const { data, error } = await sb.functions.invoke('manage-valvomo-users', { body: { action: 'delete', user_id: u.id } })
+    const { data, error } = await sb.functions.invoke('manage-company-users', { body: { action: 'delete', user_id: u.id } })
     if (error || data?.error) { setUserErr(data?.error || error.message); return }
     loadUsers()
   }
@@ -468,16 +353,6 @@ function DashboardInner({ session }) {
       alert('Tallennus ei muuttanut mitään — todennäköisesti Row Level Security estää päivityksen. Aja teams_rls_fix.sql Supabasen SQL Editorissa.')
       return
     }
-    load()
-  }
-
-  async function addInstaller() {
-    const name = newInstallerName.trim(), pinVal = newInstallerPin.trim()
-    if (!name || pinVal.length < 4) { alert('Anna nimi ja vähintään 4-numeroinen PIN.'); return }
-    const { data, error } = await sb.from('installers').insert([{ name, pin: pinVal }]).select()
-    if (error) { alert('Lisäys epäonnistui: ' + error.message); return }
-    if (!data || data.length === 0) { alert('Lisäys ei tallentunut — tarkista RLS-oikeudet (teams_rls_fix.sql).'); return }
-    setNewInstallerName(''); setNewInstallerPin('')
     load()
   }
 
@@ -495,16 +370,9 @@ function DashboardInner({ session }) {
     load()
   }
 
-  // --- Paalutus: paaluttajien hallinta ---
-  async function addPileOperator() {
-    const name = newPileOpName.trim(), pinVal = newPileOpPin.trim()
-    if (!name || pinVal.length < 4) { alert('Anna nimi ja vähintään 4-numeroinen PIN.'); return }
-    const { data, error } = await sb.from('pile_operators').insert([{ name, pin: pinVal }]).select()
-    if (error) { alert('Lisäys epäonnistui: ' + error.message); return }
-    if (!data || data.length === 0) { alert('Lisäys ei tallentunut — tarkista RLS-oikeudet pile_operators-taululle.'); return }
-    setNewPileOpName(''); setNewPileOpPin('')
-    load()
-  }
+  // --- Paalutus: paaluttajien hallinta (uudet tilit luodaan Käyttäjät-
+  // välilehdellä roolilla "Paaluttaja" — he ilmestyvät tähän listaan
+  // automaattisesti ensimmäisen kirjautumisen jälkeen) ---
   async function deletePileOperator(op) {
     if (!window.confirm(`Poistetaanko paaluttaja ${op.name}?`)) return
     const { error } = await sb.from('pile_operators').delete().eq('id', op.id)
@@ -519,7 +387,7 @@ function DashboardInner({ session }) {
     setExpandedRowKey(key)
     setExpandedRowPiles(null)
     setEditPileId(null)
-    const site = pileSiteFilter || KNOWN_SITES[0]?.key
+    const site = pileSiteFilter || sites[0]?.id
     const { data, error } = await sb.from('piles').select('*').eq('site', site).eq('area', area).eq('row_number', rowNumber).order('id')
     // Sama fyysinen pääsuunta-lajittelu kuin paaluttajan näkymässä (PaalutusView),
     // jotta valvomon numerointi ja vienti täsmäävät paaluttajan omaan näkymään.
@@ -530,7 +398,7 @@ function DashboardInner({ session }) {
   // merkitsemättömiksi (esim. jos paaluttaja teki virheen koko rivillä).
   async function resetWholeRow(area, rowNumber) {
     if (!window.confirm(`Tyhjennetäänkö KOKO rivi ${rowNumber} (${area})? Kaikki sen paalujen merkinnät poistuvat.`)) return
-    const site = pileSiteFilter || KNOWN_SITES[0]?.key
+    const site = pileSiteFilter || sites[0]?.id
     const { error } = await sb.from('piles').update({
       pile_type: null, extra_action: null, pull_test_kn: null,
       status: 'open', installed_by: null, installed_at: null
@@ -575,7 +443,7 @@ function DashboardInner({ session }) {
   // jakovalikkoa, samat tiedostot kuin paaluttajan puhelimessa)
   async function downloadRowFiles(area, rowNumber) {
     if (!expandedRowPiles || expandedRowPiles.length === 0) return
-    const siteLabel = KNOWN_SITES.find(s => s.key === (pileSiteFilter || KNOWN_SITES[0]?.key))?.label || pileSiteFilter
+    const siteLabel = sites.find(s => s.id === (pileSiteFilter || sites[0]?.id))?.label || pileSiteFilter
     const { pdfBlob, xlsxBlob, baseName } = await buildRowExportFiles(expandedRowPiles, area, rowNumber, siteLabel)
     for (const [blob, name] of [[pdfBlob, `${baseName}.pdf`], [xlsxBlob, `${baseName}.xlsx`]]) {
       const url = URL.createObjectURL(blob)
@@ -591,6 +459,29 @@ function DashboardInner({ session }) {
       <div style={{ background: 'linear-gradient(135deg, #1560c4, #0e8fe0)', padding: '20px 30px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, boxShadow: '0 2px 12px rgba(21,96,196,0.18)' }}>
         <div>
           <div style={{ color: '#fff', fontWeight: 800, fontSize: 21, letterSpacing: 0.2 }}>KORPNEX <span style={{ opacity: 0.55, fontWeight: 500 }}>·</span> Valvomo</div>
+          <div style={{ color: 'rgba(255,255,255,0.92)', fontSize: 13, marginTop: 3, display: 'flex', alignItems: 'center', gap: 6 }}>
+            {editingCompanyName ? (
+              <>
+                <input
+                  value={companyNameInput} onChange={e => setCompanyNameInput(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && saveCompanyName()}
+                  autoFocus
+                  style={{ padding: '3px 8px', borderRadius: 6, border: 'none', fontSize: 13 }}
+                />
+                <button onClick={saveCompanyName} style={{ background: 'rgba(255,255,255,0.25)', border: 'none', color: '#fff', borderRadius: 6, padding: '3px 8px', fontSize: 12, cursor: 'pointer' }}>✓</button>
+                <button onClick={() => setEditingCompanyName(false)} style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.7)', fontSize: 12, cursor: 'pointer' }}>✕</button>
+              </>
+            ) : (
+              <>
+                🏢 {company?.name || '—'}
+                <button
+                  onClick={() => { setCompanyNameInput(company?.name || ''); setEditingCompanyName(true) }}
+                  title="Muokkaa yrityksen nimeä"
+                  style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.7)', fontSize: 12, cursor: 'pointer' }}
+                >✏️</button>
+              </>
+            )}
+          </div>
           <div style={{ color: 'rgba(255,255,255,0.75)', fontSize: 12.5, marginTop: 3 }}>
             {loading ? 'Ladataan…' : `Päivitetty ${lastRefresh?.toLocaleTimeString('fi-FI')} · päivittyy automaattisesti`}
           </div>
@@ -600,7 +491,7 @@ function DashboardInner({ session }) {
           <button onClick={load} style={{ background: 'rgba(255,255,255,0.16)', border: 'none', color: '#fff', borderRadius: 9, padding: '10px 18px', fontSize: 13, fontWeight: 700, cursor: 'pointer', transition: 'background 0.15s' }}>
             🔄 Päivitä nyt
           </button>
-          <button onClick={() => sb.auth.signOut()} style={{ background: 'rgba(255,255,255,0.16)', border: 'none', color: '#fff', borderRadius: 9, padding: '10px 14px', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
+          <button onClick={logout} style={{ background: 'rgba(255,255,255,0.16)', border: 'none', color: '#fff', borderRadius: 9, padding: '10px 14px', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
             Kirjaudu ulos
           </button>
         </div>
@@ -616,13 +507,14 @@ function DashboardInner({ session }) {
           <SummaryCard label="Tiimejä" value={teams.length} color="#8a5fc9" />
           <SummaryCard label="Läheltäpiti" value={nearMissObs.length} color="#a06800" />
           <SummaryCard label="Urakoitsijoita" value={contractors.length} color="#1560c4" />
+          <SummaryCard label="Työmaita" value={sites.length} color="#0e8fe0" />
         </div>
 
         {/* Suodattimet */}
         <div style={{ display: 'flex', gap: 10, marginBottom: 22, flexWrap: 'wrap', alignItems: 'center' }}>
           <select value={siteFilter} onChange={e => setSiteFilter(e.target.value)} style={selectStyle}>
             <option value="">Kaikki työmaat</option>
-            {KNOWN_SITES.map(s => <option key={s.key} value={s.label}>{s.label}</option>)}
+            {sites.map(s => <option key={s.id} value={s.label}>{s.label}</option>)}
           </select>
           <select value={teamFilter} onChange={e => setTeamFilter(e.target.value)} style={selectStyle}>
             <option value="">Kaikki tiimit</option>
@@ -634,20 +526,21 @@ function DashboardInner({ session }) {
             onChange={e => setSearch(e.target.value)}
             style={{ ...selectStyle, flex: 1, minWidth: 220 }}
           />
-          <div style={{ display: 'flex', gap: 3, background: '#e9ebf6', padding: 4, borderRadius: 10 }}>
+          <div style={{ display: 'flex', gap: 3, background: '#e9ebf6', padding: 4, borderRadius: 10, flexWrap: 'wrap' }}>
             <TabButton active={tab === 'open'} onClick={() => { setTab('open'); clearSelection() }}>Avoimet ({openObs.length})</TabButton>
             <TabButton active={tab === 'fixed'} onClick={() => { setTab('fixed'); clearSelection() }}>Korjatut ({fixedObs.length})</TabButton>
             <TabButton active={tab === 'nearmiss'} onClick={() => { setTab('nearmiss'); clearSelection() }}>Läheltäpiti ({nearMissObs.length})</TabButton>
             <TabButton active={tab === 'hidden'} onClick={() => { setTab('hidden'); clearSelection() }}>Piilotetut ({hiddenObs.length})</TabButton>
             <TabButton active={tab === 'teams'} onClick={() => { setTab('teams'); clearSelection() }}>Tiimit</TabButton>
             <TabButton active={tab === 'contractors'} onClick={() => { setTab('contractors'); clearSelection() }}>Urakoitsijat</TabButton>
+            <TabButton active={tab === 'sites'} onClick={() => { setTab('sites'); clearSelection() }}>Työmaat</TabButton>
             <TabButton active={tab === 'users'} onClick={() => { setTab('users'); clearSelection(); loadUsers() }}>Käyttäjät</TabButton>
             <TabButton active={tab === 'piling'} onClick={() => { setTab('piling'); clearSelection() }}>Paalutus</TabButton>
           </div>
         </div>
 
         {/* Massatoimintopalkki */}
-        {selected.size > 0 && tab !== 'teams' && tab !== 'piling' && tab !== 'contractors' && tab !== 'users' && (
+        {selected.size > 0 && tab !== 'teams' && tab !== 'piling' && tab !== 'contractors' && tab !== 'users' && tab !== 'sites' && (
           <div style={{ position: 'sticky', top: 12, zIndex: 10, background: '#fff', border: '1px solid #d0d5e8', borderRadius: 12, padding: '10px 16px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 12, boxShadow: '0 4px 16px rgba(20,30,80,0.10)' }}>
             <span style={{ fontSize: 13, fontWeight: 700, color: '#0d1a6e' }}>{selected.size} valittu</span>
             <div style={{ flex: 1 }} />
@@ -840,25 +733,8 @@ function DashboardInner({ session }) {
                 ))}
               </div>
 
-              <div style={{ fontSize: 11, fontWeight: 700, color: '#9aa2c0', marginTop: 18, marginBottom: 8, textTransform: 'uppercase' }}>+ Uusi asentaja</div>
-              <div style={{ display: 'flex', gap: 6, maxWidth: 480 }}>
-                <input
-                  placeholder="Nimi"
-                  value={newInstallerName}
-                  onChange={e => setNewInstallerName(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && addInstaller()}
-                  style={{ ...selectStyle, flex: 2 }}
-                />
-                <input
-                  placeholder="PIN"
-                  value={newInstallerPin}
-                  onChange={e => setNewInstallerPin(e.target.value.replace(/\D/g, ''))}
-                  onKeyDown={e => e.key === 'Enter' && addInstaller()}
-                  inputMode="numeric"
-                  maxLength={6}
-                  style={{ ...selectStyle, flex: 1 }}
-                />
-                <button onClick={addInstaller} style={{ background: '#1560c4', color: '#fff', border: 'none', borderRadius: 8, padding: '0 16px', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>+</button>
+              <div style={{ fontSize: 12, color: '#9aa2c0', marginTop: 18, lineHeight: 1.5 }}>
+                Uudet asentajat luodaan <b>Käyttäjät</b>-välilehdellä (rooli: Asentaja) — he ilmestyvät tähän listaan automaattisesti heti kun he kirjautuvat ensimmäistä kertaa omalla sähköposti+salasana-tilillään.
               </div>
             </div>
           </div>
@@ -988,12 +864,44 @@ function DashboardInner({ session }) {
           </div>
         )}
 
+        {tab === 'sites' && (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 16 }}>
+            <div style={{ ...cardStyle, padding: 18 }}>
+              <div style={{ fontWeight: 700, fontSize: 14, color: '#0d1a6e', marginBottom: 10 }}>+ Uusi työmaa</div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input
+                  placeholder="Työmaan nimi (esim. Aurinkopuisto 3)"
+                  value={newSiteLabel}
+                  onChange={e => setNewSiteLabel(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && createSite()}
+                  style={{ ...selectStyle, flex: 1 }}
+                />
+                <button onClick={createSite} style={{ background: '#1560c4', color: '#fff', border: 'none', borderRadius: 8, padding: '9px 16px', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>Luo</button>
+              </div>
+            </div>
+
+            <div style={{ ...cardStyle, padding: 20, gridColumn: '1 / -1' }}>
+              <div style={{ fontWeight: 700, fontSize: 15, color: '#0d1a6e', marginBottom: 14 }}>Yrityksen työmaat</div>
+              {sites.length === 0 && <div style={{ fontSize: 13, color: '#9aa2c0' }}>Ei työmaita vielä — luo ensimmäinen yllä.</div>}
+              {sites.map(s => (
+                <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '9px 0', borderBottom: '1px solid #f4f5fa', gap: 10 }}>
+                  <span style={{ fontSize: 14 }}>📍 {s.label}</span>
+                  <button onClick={() => deleteSite(s.id)} title="Poista työmaa" style={{ background: 'none', border: 'none', color: '#b02828', fontSize: 15, cursor: 'pointer', padding: '2px 4px' }}>🗑️</button>
+                </div>
+              ))}
+              <div style={{ fontSize: 11.5, color: '#9aa2c0', marginTop: 14 }}>
+                Työmaan kartta (DXF) ladataan tarkastajan näkymässä (?tarkastaja) työmaan valinnan yhteydessä.
+              </div>
+            </div>
+          </div>
+        )}
+
         {tab === 'users' && (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 16 }}>
             <div style={{ ...cardStyle, padding: 18 }}>
               <div style={{ fontWeight: 700, fontSize: 14, color: '#0d1a6e', marginBottom: 10 }}>+ Uusi käyttäjä</div>
               <div style={{ fontSize: 12, color: '#6670a0', marginBottom: 10 }}>
-                Luo tunnus toiselle työnjohtajalle/valvojalle — hän voi kirjautua Valvomoon näillä tiedoilla heti (ei vaadi sähköpostin vahvistusta).
+                Luo tunnus toiselle yrityksesi käyttäjälle (työnjohtaja, asentaja tai paaluttaja) — hän voi kirjautua näillä tiedoilla heti (ei vaadi sähköpostin vahvistusta).
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <input
@@ -1008,35 +916,40 @@ function DashboardInner({ session }) {
                   onKeyDown={e => e.key === 'Enter' && createUser()}
                   style={selectStyle}
                 />
+                <select value={newUserRole} onChange={e => setNewUserRole(e.target.value)} style={selectStyle}>
+                  <option value="asentaja">Asentaja</option>
+                  <option value="paaluttaja">Paaluttaja</option>
+                  <option value="admin">Ylläpitäjä (Valvomo)</option>
+                </select>
                 {userErr && <div style={{ color: '#d63030', fontSize: 12.5 }}>{userErr}</div>}
                 <button onClick={createUser} style={{ background: '#1560c4', color: '#fff', border: 'none', borderRadius: 8, padding: '9px 16px', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
                   Luo käyttäjä
                 </button>
                 <div style={{ fontSize: 11, color: '#9aa2c0' }}>
-                  Käyttäjä voi itse vaihtaa tämän salasanan kirjautumissivun "Unohtuiko salasana?" -linkistä.
+                  Käyttäjä voi itse vaihtaa tämän salasanan kirjautumissivun "Unohtuiko salasana?" -linkistä. Asentaja/Paaluttaja-tilit ilmestyvät Tiimit/Paalutus-välilehdille automaattisesti kun he kirjautuvat ensimmäistä kertaa.
                 </div>
               </div>
             </div>
 
             <div style={{ ...cardStyle, padding: 20, gridColumn: '1 / -1' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-                <div style={{ fontWeight: 700, fontSize: 15, color: '#0d1a6e' }}>Valvomoon kirjautuvat käyttäjät</div>
+                <div style={{ fontWeight: 700, fontSize: 15, color: '#0d1a6e' }}>Yrityksen käyttäjät</div>
                 <button onClick={loadUsers} style={{ background: '#eef0f7', border: 'none', color: '#1560c4', borderRadius: 8, padding: '6px 12px', fontSize: 12.5, fontWeight: 700, cursor: 'pointer' }}>
                   🔄 Päivitä lista
                 </button>
               </div>
               {usersLoading && <div style={{ fontSize: 13, color: '#9aa2c0' }}>Ladataan…</div>}
-              {!usersLoading && valvomoUsers.length === 0 && (
+              {!usersLoading && companyUsers.length === 0 && (
                 <div style={{ fontSize: 13, color: '#9aa2c0' }}>
-                  Ei käyttäjiä listattavissa. Jos tämä on ensimmäinen kerta, varmista että manage-valvomo-users-funktio on deployattu Supabaseen.
+                  Ei käyttäjiä listattavissa. Jos tämä on ensimmäinen kerta, varmista että manage-company-users-funktio on deployattu Supabaseen.
                 </div>
               )}
-              {valvomoUsers.map(u => (
+              {companyUsers.map(u => (
                 <div key={u.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '1px solid #f4f5fa', gap: 10 }}>
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontSize: 14, fontWeight: 600 }}>{u.email}{u.id === session?.user?.id ? ' (sinä)' : ''}</div>
                     <div style={{ fontSize: 11, color: '#9aa2c0' }}>
-                      Viimeksi kirjautunut: {u.last_sign_in_at ? fmtTime(u.last_sign_in_at) : 'ei koskaan'}
+                      {ROLE_LABEL[u.role] || u.role} · luotu {fmtTime(u.created_at)}
                     </div>
                   </div>
                   {u.id !== session?.user?.id && (
@@ -1060,25 +973,8 @@ function DashboardInner({ session }) {
                     <button onClick={() => deletePileOperator(op)} title="Poista paaluttaja" style={{ background: 'none', border: 'none', color: '#b02828', fontSize: 15, cursor: 'pointer', padding: '2px 4px' }}>🗑️</button>
                   </div>
                 ))}
-                <div style={{ fontSize: 11, fontWeight: 700, color: '#9aa2c0', marginTop: 18, marginBottom: 8, textTransform: 'uppercase' }}>+ Uusi paaluttaja</div>
-                <div style={{ display: 'flex', gap: 6 }}>
-                  <input
-                    placeholder="Nimi"
-                    value={newPileOpName}
-                    onChange={e => setNewPileOpName(e.target.value)}
-                    onKeyDown={e => e.key === 'Enter' && addPileOperator()}
-                    style={{ ...selectStyle, flex: 2 }}
-                  />
-                  <input
-                    placeholder="PIN"
-                    value={newPileOpPin}
-                    onChange={e => setNewPileOpPin(e.target.value.replace(/\D/g, ''))}
-                    onKeyDown={e => e.key === 'Enter' && addPileOperator()}
-                    inputMode="numeric"
-                    maxLength={6}
-                    style={{ ...selectStyle, flex: 1 }}
-                  />
-                  <button onClick={addPileOperator} style={{ background: '#1560c4', color: '#fff', border: 'none', borderRadius: 8, padding: '0 16px', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>+</button>
+                <div style={{ fontSize: 12, color: '#9aa2c0', marginTop: 18, lineHeight: 1.5 }}>
+                  Uudet paaluttajat luodaan <b>Käyttäjät</b>-välilehdellä (rooli: Paaluttaja) — he ilmestyvät tähän listaan automaattisesti ensimmäisen kirjautumisen jälkeen.
                 </div>
               </div>
             </div>
@@ -1087,7 +983,7 @@ function DashboardInner({ session }) {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
                 <div style={{ fontWeight: 700, fontSize: 15, color: '#0d1a6e' }}>Paalutuksen eteneminen</div>
                 <select value={pileSiteFilter} onChange={e => setPileSiteFilter(e.target.value)} style={selectStyle}>
-                  {KNOWN_SITES.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
+                  {sites.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
                 </select>
               </div>
 

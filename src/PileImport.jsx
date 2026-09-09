@@ -1,38 +1,61 @@
 // src/PileImport.jsx
 // Kertaluontoinen (mutta uudelleenajettava) tuontisivu paalukartta-DXF:lle.
 // Avataan osoitteella ?paalutuonti — ei linkitetty mistään näkyvästä
-// valikosta, samaan tapaan kuin ?valvomo.
-import React, { useState } from 'react'
+// valikosta, samaan tapaan kuin ?valvomo. Admin-työkalu, siksi
+// allowedRoles=['admin'].
+import React, { useState, useEffect } from 'react'
 import { sb } from './supabaseClient.js'
 import { parsePileCSV } from './dxfParser.js'
-import { KNOWN_SITES } from './shared.js'
+import AuthGate from './AuthGate.jsx'
 
 const BATCH_SIZE = 500
 
 export default function PileImport() {
-  const [siteKey, setSiteKey] = useState(KNOWN_SITES[0]?.key || '')
+  return (
+    <AuthGate allowedRoles={['admin']} title="Paalutuonti">
+      {({ profile, logout }) => <PileImportApp profile={profile} logout={logout} />}
+    </AuthGate>
+  )
+}
+
+function PileImportApp({ profile, logout }) {
+  const companyId = profile.company_id
+  const [sites, setSites] = useState([])
+  const [siteId, setSiteId] = useState('')
   const [busy, setBusy] = useState(false)
   const [log, setLog] = useState([])
   const [done, setDone] = useState(false)
+
+  // Yrityksen työmaat DB:stä (korvaa vanhan kovakoodatun KNOWN_SITES-listan).
+  useEffect(() => {
+    sb.from('sites').select('*').order('label').then(({ data }) => {
+      setSites(data || [])
+      if ((data || []).length && !siteId) setSiteId(data[0].id)
+    })
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   function addLog(msg) {
     setLog(prev => [...prev, msg])
   }
 
   async function runImport() {
+    if (!siteId) { addLog('❌ Valitse ensin työmaa (luo yksi Valvomon Työmaat-välilehdellä, jos listalla ei ole yhtään).'); return }
+    const siteLabel = sites.find(s => s.id === siteId)?.label || siteId
     setBusy(true)
     setDone(false)
     setLog([])
     try {
-      // HUOM: paalukartta ladataan kevyenä CSV:nä ("{site}_piles.csv"), EI
-      // raakana DXF:nä. UUSI MUOTO: CSV sisältää jo OIKEAT työmaan
-      // rivinumerot ja aluejaon (pole_id,area,row_number,x,y), poimittu
-      // paikallisesti kahdeksasta aluekohtaisesta paalutuskartta-DXF:stä —
-      // ei enää tarvetta arvata/klusteroida rivejä sovelluksessa.
-      addLog(`Ladataan ${siteKey}_piles.csv Supabase Storagesta...`)
-      const { data, error } = await sb.storage.from('maps').download(`${siteKey}_piles.csv`)
+      // HUOM: paalukartta ladataan kevyenä CSV:nä ("{company_id}/{site_id}_piles.csv"),
+      // EI raakana DXF:nä. CSV sisältää jo OIKEAT työmaan rivinumerot ja
+      // aluejaon (pole_id,area,row_number,x,y), poimittu paikallisesti
+      // kahdeksasta aluekohtaisesta paalutuskartta-DXF:stä — ei enää tarvetta
+      // arvata/klusteroida rivejä sovelluksessa. Tallennuspolku on yrityksen
+      // ja työmaan id:n mukaan, sama käytäntö kuin DXF-kartoilla.
+      const storagePath = `${companyId}/${siteId}_piles.csv`
+      addLog(`Ladataan ${storagePath} Supabase Storagesta...`)
+      const { data, error } = await sb.storage.from('maps').download(storagePath)
       if (error || !data) {
-        addLog('❌ CSV:tä ei löytynyt bucketista "maps". Tarkista tiedostonimi.')
+        addLog('❌ CSV:tä ei löytynyt bucketista "maps". Tarkista tiedostonimi/polku.')
         setBusy(false)
         return
       }
@@ -54,7 +77,8 @@ export default function PileImport() {
       let saved = 0
       for (let i = 0; i < rows.length; i += BATCH_SIZE) {
         const batch = rows.slice(i, i + BATCH_SIZE).map(r => ({
-          site: siteKey,
+          site: siteId,
+          company_id: companyId,
           pole_id: r.poleId,
           area: r.area,
           row_group_id: `${r.area}_${r.rowNumber}`,
@@ -72,7 +96,7 @@ export default function PileImport() {
         addLog(`  ...${saved} / ${rows.length} tallennettu`)
       }
 
-      addLog(`✅ Valmis! ${saved} paalua, ${areaCount} aluetta, ${rowCount} riviä tuotu työmaalle "${siteKey}".`)
+      addLog(`✅ Valmis! ${saved} paalua, ${areaCount} aluetta, ${rowCount} riviä tuotu työmaalle "${siteLabel}".`)
       setDone(true)
     } catch (e) {
       addLog(`❌ Odottamaton virhe: ${e.message}`)
@@ -82,7 +106,12 @@ export default function PileImport() {
 
   return (
     <div style={{ maxWidth: 480, margin: '0 auto', padding: 20, fontFamily: 'sans-serif' }}>
-      <h2>Paalujen tuonti DXF:stä</h2>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <h2 style={{ margin: 0 }}>Paalujen tuonti DXF:stä</h2>
+        <button onClick={logout} style={{ padding: '6px 10px', border: '1px solid #ccc', borderRadius: 6, background: '#fff', fontSize: 13 }}>
+          Kirjaudu ulos
+        </button>
+      </div>
       <p style={{ color: '#666', fontSize: 14 }}>
         Lukee valitun työmaan paalu-CSV:n Storagesta (bucket "maps") — CSV
         sisältää jo valmiin alue- ja rivijaon — ja tallentaa/päivittää ne
@@ -92,19 +121,20 @@ export default function PileImport() {
 
       <label style={{ display: 'block', marginBottom: 6, fontWeight: 'bold' }}>Työmaa</label>
       <select
-        value={siteKey}
-        onChange={e => setSiteKey(e.target.value)}
+        value={siteId}
+        onChange={e => setSiteId(e.target.value)}
         disabled={busy}
         style={{ width: '100%', padding: 8, marginBottom: 16, fontSize: 16 }}
       >
-        {KNOWN_SITES.map(s => (
-          <option key={s.key} value={s.key}>{s.label}</option>
+        {sites.length === 0 && <option value="">Ei työmaita — luo yksi Valvomon Työmaat-välilehdellä</option>}
+        {sites.map(s => (
+          <option key={s.id} value={s.id}>{s.label}</option>
         ))}
       </select>
 
       <button
         onClick={runImport}
-        disabled={busy}
+        disabled={busy || !siteId}
         style={{
           width: '100%', padding: 12, fontSize: 16, fontWeight: 'bold',
           background: busy ? '#ccc' : '#1a7a45', color: 'white', border: 'none', borderRadius: 6

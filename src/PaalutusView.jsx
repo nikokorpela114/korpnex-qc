@@ -5,9 +5,8 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { sb } from './supabaseClient.js'
 import { latLngToTM35FIN } from './coords.js'
-import { KNOWN_SITES } from './shared.js'
+import AuthGate from './AuthGate.jsx'
 
-const SESSION_KEY = 'korpnex_pile_operator_session'
 // Huonompia GPS-lukemia kuin tämä (metrejä) ei käytetä sijainnin
 // päivittämiseen — ensimmäiset watchPosition-lukemat ja metallirakenteiden
 // alla otetut lukemat voivat olla kymmeniä-satoja metrejä pielessä.
@@ -349,14 +348,25 @@ export async function buildRowExportFiles(rowPiles, areaLabel, rowNumber, siteLa
   return { pdfBlob, xlsxBlob, baseName, rowLabel }
 }
 
+// Paaluttajan kirjautuminen on jaettu AuthGate (src/AuthGate.jsx) — sama
+// komponentti kuin Valvomossa/asentajalla. Vanha nimi+PIN-valinta on
+// poistunut kokonaan.
 export default function PaalutusView() {
-  const [session, setSession] = useState(null)
-  const [operators, setOperators] = useState([])
-  const [selectedId, setSelectedId] = useState('')
-  const [pin, setPin] = useState('')
-  const [loginErr, setLoginErr] = useState('')
+  return (
+    <AuthGate allowedRoles={['paaluttaja', 'admin']} title="Paalutus">
+      {({ session, profile, logout }) => <PaalutusApp session={session} profile={profile} logout={logout} />}
+    </AuthGate>
+  )
+}
 
-  const [siteKey, setSiteKey] = useState(KNOWN_SITES[0]?.key || '')
+function PaalutusApp({ session, profile, logout }) {
+  // Ensikirjautumisella luodaan automaattisesti pile_operators-rivi jonka
+  // id = auth.uid() — ks. sama kuvio InstallerView.jsx:ssä.
+  const [operator, setOperator] = useState(undefined)
+  const [provisionErr, setProvisionErr] = useState('')
+  const [sites, setSites] = useState([])
+
+  const [siteId, setSiteId] = useState('')
   const [rowSummary, setRowSummary] = useState(null) // null = ladataan, kaikki alueet+rivit tälle työmaalle
   const [selectedArea, setSelectedArea] = useState(null)
   const [selectedRow, setSelectedRow] = useState(null)
@@ -388,47 +398,50 @@ export default function PaalutusView() {
     return () => navigator.geolocation.clearWatch(watcher)
   }, [selectedRow])
 
-  // --- Kirjautuminen ---
+  // Varmistaa että kirjautuneella auth-käyttäjällä on pile_operators-rivi
+  // jonka id = auth.uid(). Vanhoilla nimi+PIN-ajan riveillä ei ollut
+  // yhteyttä oikeisiin Auth-tileihin, niin uusi rivi luodaan aina
+  // ensimmäisellä kirjautumisella.
   useEffect(() => {
-    const saved = localStorage.getItem(SESSION_KEY)
-    if (saved) { try { setSession(JSON.parse(saved)) } catch {} }
-    sb.from('pile_operators').select('id, name').order('name').then(({ data }) => {
-      if (data) setOperators(data)
-    })
-  }, [])
+    let cancelled = false
+    ;(async () => {
+      const { data: existing, error } = await sb.from('pile_operators').select('*').eq('id', session.user.id).maybeSingle()
+      if (cancelled) return
+      if (error) { setProvisionErr(error.message); return }
+      if (existing) { setOperator(existing); return }
+      const name = profile.name || session.user.email
+      const { data: created, error: insErr } = await sb.from('pile_operators')
+        .insert([{ id: session.user.id, name, company_id: profile.company_id }])
+        .select().single()
+      if (cancelled) return
+      if (insErr) { setProvisionErr(insErr.message); return }
+      setOperator(created)
+    })()
+    return () => { cancelled = true }
+  }, [session.user.id, profile.company_id, profile.name, session.user.email])
 
-  function login() {
-    setLoginErr('')
-    sb.from('pile_operators').select('id, name, pin').eq('id', selectedId).single().then(({ data }) => {
-      if (data && String(data.pin) === String(pin)) {
-        const s = { id: data.id, name: data.name }
-        setSession(s)
-        localStorage.setItem(SESSION_KEY, JSON.stringify(s))
-      } else {
-        setLoginErr('Väärä PIN')
-      }
+  // Yrityksen työmaat DB:stä (korvaa vanhan kovakoodatun KNOWN_SITES-listan).
+  useEffect(() => {
+    sb.from('sites').select('*').order('label').then(({ data }) => {
+      setSites(data || [])
+      if ((data || []).length && !siteId) setSiteId(data[0].id)
     })
-  }
-
-  function logout() {
-    setSession(null)
-    localStorage.removeItem(SESSION_KEY)
-    setSelectedId(''); setPin('')
-  }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // --- Rivilistan lataus (kaikki alueet+rivit kerralla tälle työmaalle) ---
   const loadRowSummary = useCallback(() => {
+    if (!siteId) return
     setRowSummary(null)
-    sb.from('pile_rows_summary').select('*').eq('site', siteKey).order('area').order('row_number').then(({ data, error }) => {
+    sb.from('pile_rows_summary').select('*').eq('site', siteId).order('area').order('row_number').then(({ data, error }) => {
       setRowSummary(error ? [] : (data || []))
     })
-  }, [siteKey])
+  }, [siteId])
 
   useEffect(() => {
-    if (session) loadRowSummary()
-  }, [session, loadRowSummary])
+    if (operator && siteId) loadRowSummary()
+  }, [operator, siteId, loadRowSummary])
 
-  useEffect(() => { setSelectedArea(null); setSelectedRow(null) }, [siteKey])
+  useEffect(() => { setSelectedArea(null); setSelectedRow(null) }, [siteId])
 
   // Alueiden yhteenveto lasketaan rowSummary:sta (ei erillistä kyselyä)
   const areaSummary = React.useMemo(() => {
@@ -450,7 +463,7 @@ export default function PaalutusView() {
     setSelectedRow(rowNumber)
     setRowPiles(null)
     setEditingId(null)
-    sb.from('piles').select('*').eq('site', siteKey).eq('area', selectedArea).eq('row_number', rowNumber).order('id')
+    sb.from('piles').select('*').eq('site', siteId).eq('area', selectedArea).eq('row_number', rowNumber).order('id')
       .then(({ data, error }) => {
         if (error || !data) { setRowPiles([]); return }
         // HUOM: tietokannan järjestys on DXF:n piirtojärjestys, EI fyysinen
@@ -520,7 +533,7 @@ export default function PaalutusView() {
       extra_action: formExtra || null,
       pull_test_kn: formKn === '' ? null : parseFloat(formKn),
       status: 'done',
-      installed_by: session.name,
+      installed_by: operator?.name || session.user.email,
       installed_at: new Date().toISOString()
     }).eq('id', pileId).select().single()
     setSaving(false)
@@ -536,7 +549,7 @@ export default function PaalutusView() {
   async function exportRow() {
     if (!rowPiles || rowPiles.length === 0) return
     setExportMsg('Luodaan tiedostoja...')
-    const siteLabel = KNOWN_SITES.find(s => s.key === siteKey)?.label || siteKey
+    const siteLabel = sites.find(s => s.id === siteId)?.label || siteId
     const { pdfBlob, xlsxBlob, baseName, rowLabel } = await buildRowExportFiles(rowPiles, selectedArea, selectedRow, siteLabel)
 
     // Jaa puhelimen omalla jakovalikolla (sama tapa kuin valvomon PDF-jaossa
@@ -564,25 +577,18 @@ export default function PaalutusView() {
     }
   }
 
-  // --- Kirjautumisnäkymä ---
-  if (!session) {
+  // --- Ensikirjautuminen kesken: luodaan pile_operators-rivi automaattisesti ---
+  if (operator === undefined) {
     return (
-      <div style={{ maxWidth: 420, margin: '0 auto', padding: 20, fontFamily: 'sans-serif' }}>
-        <h2>Paalutus — kirjaudu</h2>
-        <label style={{ display: 'block', marginBottom: 6, fontWeight: 'bold' }}>Nimi</label>
-        <select value={selectedId} onChange={e => setSelectedId(e.target.value)}
-          style={{ width: '100%', padding: 10, fontSize: 16, marginBottom: 12 }}>
-          <option value="">Valitse nimesi</option>
-          {operators.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
-        </select>
-        <label style={{ display: 'block', marginBottom: 6, fontWeight: 'bold' }}>PIN-koodi</label>
-        <input type="tel" inputMode="numeric" maxLength={6} value={pin} onChange={e => setPin(e.target.value)}
-          style={{ width: '100%', padding: 10, fontSize: 16, marginBottom: 12 }} />
-        {loginErr && <div style={{ color: '#b02828', marginBottom: 12 }}>{loginErr}</div>}
-        <button onClick={login} disabled={!selectedId || !pin}
-          style={{ width: '100%', padding: 12, fontSize: 16, fontWeight: 'bold', background: '#1560c4', color: '#fff', border: 'none', borderRadius: 8 }}>
-          Kirjaudu
-        </button>
+      <div style={{ maxWidth: 420, margin: '0 auto', padding: 20, fontFamily: 'sans-serif', textAlign: 'center' }}>
+        {provisionErr ? (
+          <>
+            <p style={{ color: '#b02828' }}>Virhe tilin valmistelussa: {provisionErr}</p>
+            <button onClick={logout} style={{ padding: '10px 18px', background: '#1560c4', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 'bold' }}>Kirjaudu ulos</button>
+          </>
+        ) : (
+          <p style={{ color: '#666' }}>Ladataan…</p>
+        )}
       </div>
     )
   }
@@ -701,15 +707,16 @@ export default function PaalutusView() {
     return (
       <div style={{ maxWidth: 480, margin: '0 auto', padding: 16, fontFamily: 'sans-serif' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-          <h2 style={{ margin: 0 }}>Paalutus — {session.name}</h2>
+          <h2 style={{ margin: 0 }}>Paalutus — {operator.name}</h2>
           <button onClick={logout} style={{ padding: '6px 10px', border: '1px solid #ccc', borderRadius: 6, background: '#fff', fontSize: 13 }}>
-            Vaihda käyttäjä
+            Kirjaudu ulos
           </button>
         </div>
 
-        <select value={siteKey} onChange={e => setSiteKey(e.target.value)}
+        <select value={siteId} onChange={e => setSiteId(e.target.value)}
           style={{ width: '100%', padding: 8, fontSize: 15, marginBottom: 12 }}>
-          {KNOWN_SITES.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
+          {sites.length === 0 && <option value="">Ei työmaita</option>}
+          {sites.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
         </select>
 
         {areaSummary == null ? <p>Ladataan alueita...</p> :

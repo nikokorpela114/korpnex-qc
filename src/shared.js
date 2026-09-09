@@ -6,9 +6,10 @@
 export const ELEMENT_W_M = 1.15
 export const ELEMENT_ROW_DEPTH_M = 4.29
 
-export const KNOWN_SITES = [
-  { key: 'esimerkki', label: 'Esimerkkityömaa' },
-]
+// HUOM: KNOWN_SITES-vakio (kovakoodattu työmaalista) on POISTETTU
+// moniyritysversiossa — työmaat tulevat nyt sites-tietokantataulusta,
+// yrityskohtaisesti (ks. multi_tenant_schema.sql ja Valvomon Työmaat-
+// välilehti Dashboard.jsx:ssä).
 
 // Englanninkieliset käännökset (PDF + asentajanäkymä). Tallennetut arvot
 // (o.cat, o.sev) pysyvät suomeksi Supabasessa — vain näyttöteksti vaihtuu.

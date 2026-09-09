@@ -3,25 +3,38 @@ import React, { useState, useEffect, useRef, useMemo } from 'react'
 import { parseDXF } from './dxfParser.js'
 import { latLngToTM35FIN } from './coords.js'
 import { sb } from './supabaseClient.js'
-import { KNOWN_SITES, renderPinMapThumb, CAT_EN, SEV_EN, compressImage } from './shared.js'
+import AuthGate from './AuthGate.jsx'
+import { renderPinMapThumb, CAT_EN, SEV_EN, compressImage } from './shared.js'
 import { subscribeToPush, sendPushNotification } from './push.js'
 import MapView from './MapView.jsx'
 
-const SESSION_KEY = 'korpnex_installer_session'
-const FIXED_BATCH_KEY_PREFIX = 'korpnex_installer_fixed_batch_' // + installer id
+const FIXED_BATCH_KEY_PREFIX = 'korpnex_installer_fixed_batch_' // + auth user id
 const sevBg = { Kriittinen: '#fde2e2', Huomio: '#fdf0d5', Info: '#dcefe3' }
 const sevColor = { Kriittinen: '#b02828', Huomio: '#a06800', Info: '#1a7a45' }
 
+// Asentajan kirjautuminen on jaettu AuthGate (src/AuthGate.jsx) — sama
+// komponentti kuin Valvomossa/tarkastajalla. allowedRoles sallii roolit
+// 'asentaja' JA 'admin' (yrityksen admin voi tarvittaessa myös toimia
+// kentällä samalla tilillä).
 export default function InstallerView() {
+  return (
+    <AuthGate allowedRoles={['asentaja', 'admin']} title="Asentaja">
+      {({ session, profile, logout }) => <InstallerApp session={session} profile={profile} logout={logout} />}
+    </AuthGate>
+  )
+}
+
+function InstallerApp({ session, profile, logout }) {
   const [lang, setLang] = useState('fi')
-  const [session, setSession] = useState(null)
-  const [installers, setInstallers] = useState([])
-  const [selectedId, setSelectedId] = useState('')
-  const [pin, setPin] = useState('')
-  const [loginErr, setLoginErr] = useState('')
+  // Ensikirjautumisella luodaan automaattisesti installers-rivi jonka id =
+  // auth.uid() — vanha nimi+PIN-valintaruutu on poistunut kokonaan, PIN-
+  // kirjautumista ei enää ole. undefined = tarkistetaan/luodaan.
+  const [installer, setInstaller] = useState(undefined)
+  const [provisionErr, setProvisionErr] = useState('')
+  const [sites, setSites] = useState([])
 
   const [tasks, setTasks] = useState(null) // null = ladataan
-  const [siteKey, setSiteKey] = useState(null)
+  const [siteId, setSiteId] = useState(null)
   const [mapData, setMapData] = useState(null)
   const [gpsCoords, setGpsCoords] = useState(null)
   const [pushMsg, setPushMsg] = useState('')
@@ -35,12 +48,7 @@ export default function InstallerView() {
   const t = key => {
     const dict = {
       title: { fi: 'Omat tehtävät', en: 'My tasks' },
-      login: { fi: 'Kirjaudu asentajana', en: 'Log in as installer' },
-      chooseName: { fi: 'Valitse nimesi', en: 'Choose your name' },
-      pin: { fi: 'PIN-koodi', en: 'PIN code' },
-      loginBtn: { fi: 'Kirjaudu', en: 'Log in' },
-      wrongPin: { fi: 'Väärä PIN', en: 'Wrong PIN' },
-      logout: { fi: 'Vaihda käyttäjä', en: 'Switch user' },
+      logout: { fi: 'Kirjaudu ulos', en: 'Log out' },
       noTasks: { fi: 'Ei avoimia tehtäviä 🎉', en: 'No open tasks 🎉' },
       markFixed: { fi: '✓ Merkitse korjatuksi', en: '✓ Mark as fixed' },
       loading: { fi: 'Ladataan…', en: 'Loading…' },
@@ -58,13 +66,27 @@ export default function InstallerView() {
     return dict[key]?.[lang] ?? key
   }
 
-  // Restore session
+  // Varmistaa että kirjautuneella auth-käyttäjällä on installers-rivi jonka
+  // id = auth.uid(). Vanhoilla nimi+PIN-ajan riveillä ei ollut mitään
+  // yhteyttä oikeisiin Auth-tileihin, niin uusi rivi luodaan aina
+  // ensimmäisellä kirjautumisella (ja säilyy sen jälkeen ennallaan).
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(SESSION_KEY)
-      if (raw) setSession(JSON.parse(raw))
-    } catch {}
-  }, [])
+    let cancelled = false
+    ;(async () => {
+      const { data: existing, error } = await sb.from('installers').select('*').eq('id', session.user.id).maybeSingle()
+      if (cancelled) return
+      if (error) { setProvisionErr(error.message); return }
+      if (existing) { setInstaller(existing); return }
+      const name = profile.name || session.user.email
+      const { data: created, error: insErr } = await sb.from('installers')
+        .insert([{ id: session.user.id, name, company_id: profile.company_id }])
+        .select().single()
+      if (cancelled) return
+      if (insErr) { setProvisionErr(insErr.message); return }
+      setInstaller(created)
+    })()
+    return () => { cancelled = true }
+  }, [session.user.id, profile.company_id, profile.name, session.user.email])
 
   // Palauta kesken jäänyt "korjattu mutta ei vielä kuitattu" -lista, jos
   // sovellus suljettiin (esim. puhelin lukittui taskussa) ennen kuin
@@ -73,66 +95,41 @@ export default function InstallerView() {
   // — itse korjausmerkinnät ovat toki jo tallessa Supabasessa, mutta
   // ilmoitus jäisi silti lähettämättä.
   useEffect(() => {
-    if (!session) return
     try {
-      const raw = localStorage.getItem(FIXED_BATCH_KEY_PREFIX + session.id)
+      const raw = localStorage.getItem(FIXED_BATCH_KEY_PREFIX + session.user.id)
       if (raw) setFixedBatch(JSON.parse(raw))
     } catch {}
-  }, [session])
+  }, [session.user.id])
 
   // Tallenna lista joka kerta kun se muuttuu, jotta sovelluksen sulkeminen
   // (vahingossa tai tarkoituksella) ei koskaan hukkaa kertyneitä korjauksia.
   useEffect(() => {
-    if (!session) return
     try {
-      if (fixedBatch.length > 0) localStorage.setItem(FIXED_BATCH_KEY_PREFIX + session.id, JSON.stringify(fixedBatch))
-      else localStorage.removeItem(FIXED_BATCH_KEY_PREFIX + session.id)
+      if (fixedBatch.length > 0) localStorage.setItem(FIXED_BATCH_KEY_PREFIX + session.user.id, JSON.stringify(fixedBatch))
+      else localStorage.removeItem(FIXED_BATCH_KEY_PREFIX + session.user.id)
     } catch {}
-  }, [fixedBatch, session])
+  }, [fixedBatch, session.user.id])
 
-  // Load installer list for the login picker
+  // Yrityksen työmaat DB:stä — käytetään observations.site (nimiteksti) →
+  // sites.id -yhteyden selvittämiseen DXF-polkua varten (ks. alempi useEffect).
   useEffect(() => {
-    if (session) return
-    sb.from('installers').select('id, name').order('name').then(({ data }) => {
-      if (data) setInstallers(data)
-    })
-  }, [session])
-
-  function login() {
-    setLoginErr('')
-    const inst = installers.find(i => i.id === selectedId)
-    if (!inst) return
-    sb.from('installers').select('id, name, pin').eq('id', selectedId).single().then(({ data }) => {
-      if (data && String(data.pin) === String(pin)) {
-        const s = { id: data.id, name: data.name }
-        localStorage.setItem(SESSION_KEY, JSON.stringify(s))
-        setSession(s)
-      } else {
-        setLoginErr(t('wrongPin'))
-      }
-    })
-  }
-
-  function logout() {
-    localStorage.removeItem(SESSION_KEY)
-    setSession(null)
-    setTasks(null)
-  }
+    sb.from('sites').select('*').then(({ data }) => setSites(data || []))
+  }, [])
 
   // Fetch open tasks assigned to this installer. Läheltäpiti-ilmoitukset
   // (type = 'laheltapiti') eivät kuulu tähän listaan — niillä ei ole
   // korjausseurantaa (ei korjauskuvaa/"merkitse korjatuksi" -työnkulkua),
   // vanhat rivit (type = null) tulkitaan aina "vika":ksi.
   async function loadTasks() {
-    if (!session) return
+    if (!installer) return
     const { data } = await sb.from('observations')
       .select('*')
-      .eq('assigned_installer_id', session.id)
+      .eq('assigned_installer_id', installer.id)
       .eq('status', 'avoin')
       .order('created_at', { ascending: true })
     setTasks((data || []).filter(o => (o.type || 'vika') !== 'laheltapiti'))
   }
-  useEffect(() => { loadTasks() }, [session])
+  useEffect(() => { loadTasks() }, [installer])
 
   // Pre-render a small STATIC map snapshot per task (once, memoized) instead
   // of mounting a full interactive <MapView> for every open task. With many
@@ -179,25 +176,27 @@ export default function InstallerView() {
     setTimeout(() => setHighlightId(id => (id === bestId ? null : id)), 1800)
   }
 
-  // Figure out which site's map to show — first distinct site among open tasks
+  // Figure out which site's map to show — first distinct site among open tasks.
+  // observations.site tallentaa työmaan NIMEN (label), joten se pitää
+  // yhdistää sites-tauluun id:n löytämiseksi DXF-tallennuspolkua varten.
   useEffect(() => {
-    if (!tasks || tasks.length === 0) return
+    if (!tasks || tasks.length === 0 || sites.length === 0) return
     const firstSite = tasks[0].site
-    const known = KNOWN_SITES.find(s => s.label === firstSite)
-    if (known) setSiteKey(known.key)
-  }, [tasks])
+    const found = sites.find(s => s.label === firstSite)
+    if (found) setSiteId(found.id)
+  }, [tasks, sites])
 
   useEffect(() => {
-    if (!siteKey) return
+    if (!siteId) return
     setMapData(null)
-    sb.storage.from('maps').download(`${siteKey}.dxf`).then(({ data, error }) => {
+    sb.storage.from('maps').download(`${profile.company_id}/${siteId}.dxf`).then(({ data, error }) => {
       if (error || !data) return
       data.text().then(text => {
         const parsed = parseDXF(text)
         if (parsed) setMapData(parsed)
       })
     })
-  }, [siteKey])
+  }, [siteId, profile.company_id])
 
   useEffect(() => {
     if (!navigator.geolocation || !mapData) return
@@ -211,7 +210,7 @@ export default function InstallerView() {
   }, [mapData])
 
   async function enableNotifications() {
-    const res = await subscribeToPush('installer', session.id)
+    const res = await subscribeToPush('installer', installer.id, profile.company_id)
     setPushMsg(res.ok ? t('notifOnDone') : (res.reason || 'Ei onnistunut'))
   }
 
@@ -256,11 +255,12 @@ export default function InstallerView() {
     const catSummary = cats.length <= 2 ? cats.join(', ') : `${cats.length} eri vikatyyppiä`
     const site = fixedBatch[0]?.site || ''
     setConfirmMsg(lang === 'en' ? 'Sending…' : 'Lähetetään…')
+    const installerName = installer?.name || session.user.email
     const res = await sendPushNotification({
       role: 'supervisor',
       title: lang === 'en'
-        ? `${session.name} fixed ${n} item${n === 1 ? '' : 's'}`
-        : `${session.name} korjasi ${n} havainto${n === 1 ? 'n' : 'a'}`,
+        ? `${installerName} fixed ${n} item${n === 1 ? '' : 's'}`
+        : `${installerName} korjasi ${n} havainto${n === 1 ? 'n' : 'a'}`,
       body: `${catSummary} — ${site}`,
       tag: fixedBatch[0]?.reportBatch || undefined,
     })
@@ -269,32 +269,19 @@ export default function InstallerView() {
     setTimeout(() => setConfirmMsg(''), 4000)
   }
 
-  // --- Login screen ---
-  if (!session) {
+  // --- Ensikirjautuminen kesken: luodaan installers-rivi automaattisesti ---
+  if (installer === undefined) {
     return (
-      <div style={{ maxWidth: 420, margin: '0 auto', minHeight: '100vh', background: '#f4f6fb', padding: 24, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 16 }}>
-        <div style={{ textAlign: 'center', marginBottom: 8 }}>
-          <img src="/korpnex-icon.png" alt="Korpnex" style={{ height: 64, width: 'auto', display: 'block', margin: '0 auto 10px', borderRadius: 10 }} />
-          <div style={{ fontSize: 22, fontWeight: 800, color: '#1560c4', letterSpacing: 1 }}>KORPNEX</div>
-          <div style={{ fontSize: 13, color: '#6670a0' }}>{t('login')}</div>
-        </div>
-        <div>
-          <label style={{ fontSize: 12, color: '#6670a0', fontWeight: 600 }}>{t('chooseName')}</label>
-          <select value={selectedId} onChange={e => setSelectedId(e.target.value)}
-            style={{ width: '100%', padding: 12, marginTop: 4, borderRadius: 8, border: '1px solid #d0d5e8', fontSize: 15 }}>
-            <option value="">—</option>
-            {installers.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
-          </select>
-        </div>
-        <div>
-          <label style={{ fontSize: 12, color: '#6670a0', fontWeight: 600 }}>{t('pin')}</label>
-          <input type="tel" inputMode="numeric" maxLength={6} value={pin} onChange={e => setPin(e.target.value)}
-            style={{ width: '100%', padding: 12, marginTop: 4, borderRadius: 8, border: '1px solid #d0d5e8', fontSize: 20, letterSpacing: 4, textAlign: 'center' }} />
-        </div>
-        {loginErr && <div style={{ color: '#d63030', fontSize: 13, textAlign: 'center' }}>{loginErr}</div>}
-        <button onClick={login} disabled={!selectedId || !pin} style={{ padding: 14, background: '#1560c4', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 700, fontSize: 15 }}>
-          {t('loginBtn')}
-        </button>
+      <div style={{ maxWidth: 420, margin: '0 auto', minHeight: '100vh', background: '#f4f6fb', padding: 24, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 12, alignItems: 'center', textAlign: 'center' }}>
+        <img src="/korpnex-icon.png" alt="Korpnex" style={{ height: 64, width: 'auto', display: 'block', borderRadius: 10 }} />
+        {provisionErr ? (
+          <>
+            <div style={{ color: '#d63030', fontSize: 13.5 }}>Virhe tilin valmistelussa: {provisionErr}</div>
+            <button onClick={logout} style={{ padding: '10px 18px', background: '#1560c4', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 700 }}>Kirjaudu ulos</button>
+          </>
+        ) : (
+          <div style={{ color: '#6670a0', fontSize: 14 }}>{t('loading')}</div>
+        )}
       </div>
     )
   }
@@ -304,7 +291,7 @@ export default function InstallerView() {
     <div style={{ maxWidth: 480, margin: '0 auto', minHeight: '100vh', background: '#f4f6fb' }}>
       <div style={{ background: '#1560c4', padding: '16px 16px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
-          <div style={{ color: '#fff', fontWeight: 800, fontSize: 17 }}>{session.name}</div>
+          <div style={{ color: '#fff', fontWeight: 800, fontSize: 17 }}>{installer.name}</div>
           <div style={{ color: 'rgba(255,255,255,0.7)', fontSize: 12 }}>{t('title')}</div>
         </div>
         <div style={{ display: 'flex', gap: 6 }}>

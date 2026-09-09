@@ -3,12 +3,13 @@ import MapView from './MapView.jsx'
 import { parseDXF } from './dxfParser.js'
 import { latLngToTM35FIN } from './coords.js'
 import { sb } from './supabaseClient.js'
+import AuthGate from './AuthGate.jsx'
 import InstallerView from './InstallerView.jsx'
 import Dashboard from './Dashboard.jsx'
 import PileImport from './PileImport.jsx'
 import PaalutusView from './PaalutusView.jsx'
 import { subscribeToPush, sendPushNotification } from './push.js'
-import { ELEMENT_W_M, ELEMENT_ROW_DEPTH_M, KNOWN_SITES, CAT_EN, SEV_EN, PDF_STR, findPinRow, renderGroupMapImage, compressImage } from './shared.js'
+import { ELEMENT_W_M, ELEMENT_ROW_DEPTH_M, CAT_EN, SEV_EN, PDF_STR, findPinRow, renderGroupMapImage, compressImage } from './shared.js'
 
 const CATS = [
   'Elementti rikkoutunut', 'Elementti väärinpäin, yläreuna', 'Elementti väärinpäin, alareuna',
@@ -40,19 +41,32 @@ export default function App() {
     return <PileImport />
   }
   // ?paalutus — paalutajien oma näkymä. Täysin erillinen ?asentaja-
-  // näkymästä: oma komponentti, oma kirjautuminen (pile_operators-taulu,
-  // ei installers), oma data (piles-taulu, ei observations).
+  // näkymästä: oma komponentti, oma kirjautuminen, oma data (piles-taulu,
+  // ei observations).
   if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('paalutus')) {
     return <PaalutusView />
   }
 
-  const [site, setSite] = useState(KNOWN_SITES[0]?.label || '')
+  // Oletusnäkymä (ei query-parametria) = tarkastajan sovellus. Moniyritys-
+  // versiossa tämäkin vaatii oikean kirjautumisen — tarkastaja on samalla
+  // yrityksen admin-tili (samat tunnukset kuin Valvomoon).
+  return (
+    <AuthGate allowedRoles={['admin']} title="Tarkastaja">
+      {({ session, profile, logout }) => <InspectorApp session={session} profile={profile} logout={logout} />}
+    </AuthGate>
+  )
+}
+
+function InspectorApp({ session, profile, logout }) {
+  const companyId = profile.company_id
+  const [sites, setSites] = useState([])
+  const [site, setSite] = useState('') // ihmisluettava nimi (observations.site)
   const [inspector, setInspector] = useState('')
   const [rivi, setRivi] = useState('')
   const [obs, setObs] = useState([])
   const [mapData, setMapData] = useState(null)
   const [mapError, setMapError] = useState('')
-  const [currentSiteKey, setCurrentSiteKey] = useState(KNOWN_SITES[0]?.key || '')
+  const [currentSiteId, setCurrentSiteId] = useState('') // sites.id — käytetään DXF-tallennuspolussa
   const [gpsCoords, setGpsCoords] = useState(null)
   const [syncMsg, setSyncMsg] = useState('')
   const [pdfMode, setPdfMode] = useState(false)
@@ -76,8 +90,6 @@ export default function App() {
   const [assignMode, setAssignMode] = useState(false)
   const [assignInstallerId, setAssignInstallerId] = useState('')
   const [assignTeamId, setAssignTeamId] = useState('')
-  const [newInstallerName, setNewInstallerName] = useState('')
-  const [newInstallerPin, setNewInstallerPin] = useState('')
   const [assignMsg, setAssignMsg] = useState('')
   const fileInputRef = useRef(null)
   const syncTimer = useRef(null)
@@ -86,6 +98,20 @@ export default function App() {
   const metaRef = useRef({ site, inspector, rivi })
   useEffect(() => { obsRef.current = obs }, [obs])
   useEffect(() => { metaRef.current = { site, inspector, rivi } }, [site, inspector, rivi])
+
+  // Yrityksen työmaat DB:stä (korvaa vanhan kovakoodatun KNOWN_SITES-listan).
+  // Kun ne latautuvat, valitaan oletukseksi ensimmäinen työmaa — paitsi jos
+  // draftin palautus (ks. alempi useEffect) on jo asettanut jonkin muun.
+  useEffect(() => {
+    sb.from('sites').select('*').order('label').then(({ data, error }) => {
+      if (error) { console.error('Työmaiden haku epäonnistui', error); return }
+      setSites(data || [])
+      if ((data || []).length && !currentSiteId) {
+        setCurrentSiteId(data[0].id)
+        setSite(data[0].label)
+      }
+    })
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // GPS — convert ETRS-TM35FIN (EPSG:3067) coords from the DXF to lat/lng on the fly
   useEffect(() => {
@@ -99,16 +125,19 @@ export default function App() {
     return () => navigator.geolocation.clearWatch(watcher)
   }, [mapData])
 
-  // Load DXF from Supabase storage based on selected site
+  // Load DXF from Supabase storage based on selected site. Tallennuspolku on
+  // {company_id}/{site_id}.dxf — sama polkukäytäntö kuin Storagen RLS-
+  // käytännöissä (ks. multi_tenant_schema.sql), joten muiden yritysten
+  // karttoja ei voi vahingossakaan päätyä lukemaan.
   useEffect(() => {
-    loadDXF(currentSiteKey)
-  }, [currentSiteKey])
+    if (currentSiteId) loadDXF(currentSiteId)
+  }, [currentSiteId])
 
-  async function loadDXF(siteKey) {
+  async function loadDXF(siteId) {
     setMapData(null)
     setMapError('')
     try {
-      const { data, error } = await sb.storage.from('maps').download(`${siteKey}.dxf`)
+      const { data, error } = await sb.storage.from('maps').download(`${companyId}/${siteId}.dxf`)
       if (error || !data) {
         setMapError('Ei karttaa tälle työmaalle')
         return
@@ -139,6 +168,7 @@ export default function App() {
       assigned_installer_id: o.assignedInstallerId ?? null,
       assigned_team_id: o.assignedTeamId ?? null,
       report_batch: o.reportBatch ?? null,
+      company_id: companyId,
     }
     try {
       if (o.db_id) {
@@ -199,7 +229,7 @@ export default function App() {
           if (draft.site) setSite(draft.site)
           if (draft.inspector) setInspector(draft.inspector)
           if (draft.rivi) setRivi(draft.rivi)
-          if (draft.currentSiteKey) setCurrentSiteKey(draft.currentSiteKey)
+          if (draft.currentSiteId) setCurrentSiteId(draft.currentSiteId)
           showSync('↺ Luonnos palautettu')
         }
       }
@@ -213,12 +243,12 @@ export default function App() {
   useEffect(() => {
     if (!restoredRef.current) return
     try {
-      const toSave = { site, inspector, rivi, currentSiteKey, obs: obs.map(({ _timer, ...rest }) => rest) }
+      const toSave = { site, inspector, rivi, currentSiteId, obs: obs.map(({ _timer, ...rest }) => rest) }
       localStorage.setItem(DRAFT_KEY, JSON.stringify(toSave))
     } catch {
       // Quota exceeded or storage unavailable — cloud sync still applies when back online
     }
-  }, [obs, site, inspector, rivi, currentSiteKey])
+  }, [obs, site, inspector, rivi, currentSiteId])
 
   // Track connectivity and retry pending saves as soon as the connection is back
   useEffect(() => {
@@ -262,20 +292,14 @@ export default function App() {
     try { localStorage.removeItem(DRAFT_KEY) } catch {}
   }
 
+  // installers/teams tulevat automaattisesti RLS:n rajaamina omasta
+  // yrityksestä — uudet asentajat luodaan Valvomon Käyttäjät-välilehdellä
+  // (rooli: Asentaja) ja ilmestyvät tähän listaan ensimmäisen kirjautumisen
+  // jälkeen.
   useEffect(() => {
     sb.from('installers').select('*').order('name').then(({ data }) => { if (data) setInstallers(data) })
     sb.from('teams').select('*').order('name').then(({ data }) => { if (data) setTeams(data) })
   }, [])
-
-  async function addInstaller() {
-    if (!newInstallerName.trim() || newInstallerPin.trim().length < 4) return
-    const { data, error } = await sb.from('installers').insert([{ name: newInstallerName.trim(), pin: newInstallerPin.trim() }]).select()
-    if (!error && data?.[0]) {
-      setInstallers(prev => [...prev, data[0]].sort((a, b) => a.name.localeCompare(b.name)))
-      setAssignInstallerId(data[0].id)
-      setNewInstallerName(''); setNewInstallerPin('')
-    }
-  }
 
   // Assigns every current observation either to one installer OR to a
   // whole team (assignTeamId), tags them with a shared report_batch so the
@@ -438,7 +462,7 @@ export default function App() {
       setMapError('')
       showSync('✓ Kartta ladattu!')
       try {
-        await sb.storage.from('maps').upload(`${currentSiteKey}.dxf`, file, { upsert: true })
+        await sb.storage.from('maps').upload(`${companyId}/${currentSiteId}.dxf`, file, { upsert: true })
       } catch {}
     } else {
       showSync('⚠ DXF-tiedostoa ei voitu lukea')
@@ -760,6 +784,9 @@ export default function App() {
             <span style={{ fontSize: 11, color: '#070b17', fontWeight: 700, background: '#f5a800', padding: '3px 8px', borderRadius: 20 }}>⚠ Offline</span>
           )}
           {syncMsg && <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.85)' }}>{syncMsg}</span>}
+          <button onClick={logout} title="Kirjaudu ulos" style={{ background: 'rgba(255,255,255,0.12)', border: 'none', color: 'rgba(255,255,255,0.85)', borderRadius: 8, padding: '4px 9px', fontSize: 11, cursor: 'pointer' }}>
+            Kirjaudu ulos
+          </button>
         </div>
       </div>
 
@@ -770,22 +797,23 @@ export default function App() {
         <div style={{ padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 8, background: '#fff', borderBottom: '1px solid #d0d5e8' }}>
           <select
             style={selectStyle}
-            value={currentSiteKey}
+            value={currentSiteId}
             onChange={e => {
-              const key = e.target.value
-              setCurrentSiteKey(key)
-              const found = KNOWN_SITES.find(s => s.key === key)
+              const id = e.target.value
+              setCurrentSiteId(id)
+              const found = sites.find(s => s.id === id)
               setSite(found ? found.label : '')
             }}
           >
-            {KNOWN_SITES.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
+            {sites.length === 0 && <option value="">Ei työmaita — luo yksi Valvomon Työmaat-välilehdellä</option>}
+            {sites.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
           </select>
           <input style={inputStyle} placeholder="Tarkastaja" value={inspector} onChange={e => setInspector(e.target.value)} />
           <input style={inputStyle} placeholder="Rivi / alue (esim. A7-45)" value={rivi} onChange={e => setRivi(e.target.value)} />
           <button onClick={newReport} style={{ alignSelf: 'flex-end', background: 'none', border: 'none', fontSize: 11, color: '#6670a0', padding: '2px 0' }}>
             🔄 Uusi raportti
           </button>
-          <button onClick={async () => { const r = await subscribeToPush('supervisor'); setAssignMsg(r.ok ? '🔔 Ilmoitukset päällä' : (r.reason || 'Ei onnistunut')); setTimeout(() => setAssignMsg(''), 3000) }}
+          <button onClick={async () => { const r = await subscribeToPush('supervisor', null, companyId); setAssignMsg(r.ok ? '🔔 Ilmoitukset päällä' : (r.reason || 'Ei onnistunut')); setTimeout(() => setAssignMsg(''), 3000) }}
             style={{ alignSelf: 'flex-end', background: 'none', border: 'none', fontSize: 11, color: '#6670a0', padding: '2px 0' }}>
             🔔 Salli ilmoitukset (kun asentaja korjaa)
           </button>
@@ -1017,13 +1045,11 @@ export default function App() {
                 </>
               )}
 
-              <div style={{ display: 'flex', gap: 6 }}>
-                <input placeholder="Uusi asentaja: nimi" value={newInstallerName} onChange={e => setNewInstallerName(e.target.value)}
-                  style={{ ...inputStyle, flex: 2 }} />
-                <input placeholder="PIN" value={newInstallerPin} onChange={e => setNewInstallerPin(e.target.value.replace(/\D/g, ''))}
-                  inputMode="numeric" maxLength={6} style={{ ...inputStyle, flex: 1 }} />
-                <button onClick={addInstaller} style={{ padding: '0 12px', background: '#eef0f7', border: '1px solid #d0d5e8', borderRadius: 8, color: '#1560c4', fontSize: 13 }}>+</button>
-              </div>
+              {installers.length === 0 && teams.length === 0 && (
+                <div style={{ fontSize: 11.5, color: '#9aa2c0' }}>
+                  Ei asentajia vielä — luo tili Valvomon Käyttäjät-välilehdellä (rooli: Asentaja).
+                </div>
+              )}
 
               <button onClick={assignAndNotify} disabled={(!assignInstallerId && !assignTeamId) || obs.length === 0}
                 style={{ padding: 12, background: (assignInstallerId || assignTeamId) ? '#1a8a50' : '#c8cce0', border: 'none', borderRadius: 8, color: '#fff', fontWeight: 700, fontSize: 14 }}>
