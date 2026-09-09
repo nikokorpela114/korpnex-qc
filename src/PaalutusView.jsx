@@ -9,8 +9,8 @@ import { KNOWN_SITES } from './shared.js'
 
 const SESSION_KEY = 'korpnex_pile_operator_session'
 // Huonompia GPS-lukemia kuin tämä (metrejä) ei käytetä sijainnin
-// päivittämiseen — ensimmäiset watchPosition-lukemat ja paneelien alla
-// otetut lukemat voivat olla kymmeniä-satoja metrejä pielessä.
+// päivittämiseen — ensimmäiset watchPosition-lukemat ja metallirakenteiden
+// alla otetut lukemat voivat olla kymmeniä-satoja metrejä pielessä.
 const MAX_GPS_ACCURACY_M = 20
 
 // Järjestää rivin paalut niiden todellisen pääsuunnan mukaan (PCA/
@@ -356,7 +356,7 @@ export default function PaalutusView() {
   const [pin, setPin] = useState('')
   const [loginErr, setLoginErr] = useState('')
 
-  const [siteKey, setSiteKey] = useState('isoneva')
+  const [siteKey, setSiteKey] = useState(KNOWN_SITES[0]?.key || '')
   const [rowSummary, setRowSummary] = useState(null) // null = ladataan, kaikki alueet+rivit tälle työmaalle
   const [selectedArea, setSelectedArea] = useState(null)
   const [selectedRow, setSelectedRow] = useState(null)
@@ -373,8 +373,8 @@ export default function PaalutusView() {
   // GPS-seuranta vain kun rivinäkymä on auki (säästää akkua muualla).
   // HUOM: ensimmäiset watchPosition-lukemat voivat olla hyvin epätarkkoja
   // (kymmeniä-satoja metrejä pielessä) ennen kuin GPS-lukitus tarkentuu, ja
-  // paneelien alla seisominen (metallikehykset yläpuolella) heikentää
-  // tarkkuutta entisestään. Hylätään lukemat joiden accuracy on huono, jottei
+  // metallirakenteiden alla seisominen heikentää tarkkuutta entisestään.
+  // Hylätään lukemat joiden accuracy on huono, jottei
   // kartalla näytetä harhaanjohtavan tarkkaa mutta väärää sijaintia.
   const [gpsAccuracy, setGpsAccuracy] = useState(null)
   useEffect(() => {

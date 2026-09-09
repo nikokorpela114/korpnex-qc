@@ -1,7 +1,7 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react'
 
-const PANEL_W_M = 1.15   // meters per panel (width along X)
-const TABLE_DEPTH_M = 4.29  // meters deep (Y direction, always fixed)
+const ELEMENT_W_M = 1.15   // meters per element (width along X)
+const ELEMENT_ROW_DEPTH_M = 4.29  // meters deep (Y direction, always fixed)
 
 // HUOM: käytetään SAMAA tyhjää taulukkoa oletusarvona joka renderöinnillä.
 // Jos oletusarvo olisi kirjoitettu suoraan `focusPins = []` parametrina,
@@ -20,7 +20,7 @@ export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, 
   const autoCenteredRef = useRef(false) // estää GPS-keskityksen toistumisen/ohittamisen käyttäjän oman panoroinnin jälkeen
   const [followMe, setFollowMe] = useState(false) // "Seuraa sijaintia" -tila: kartta pysyy keskitettynä GPS-sijaintiin liikkuessa
 
-  const { W, H, pvAreas, roads, boundaries, inserts, panelAreas = [], rowNumbers, minX, minY, maxX, maxY } = mapData
+  const { W, H, siteAreas, roads, boundaries, inserts, elementAreas = [], rowNumbers, minX, minY, maxX, maxY } = mapData
 
   // Sovittaa näkymän annettujen pisteiden (normalisoitu 0..1) ympärille,
   // reilulla marginaalilla — käytetään sekä asentajan yleiskartan
@@ -352,7 +352,7 @@ export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, 
           <rect width={W} height={H} fill="#eef4ec" />
 
           {/* PV areas */}
-          {pvAreas.map((pts, i) => (
+          {siteAreas.map((pts, i) => (
             <polygon
               key={`pv${i}`}
               points={pts.map(p => p.join(',')).join(' ')}
@@ -386,17 +386,16 @@ export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, 
             />
           ))}
 
-          {/* Panel tables: width = panels × 1.15m along X, depth = 4.29m along Y */}
+          {/* Element rows: width = units × 1.15m along X, depth = 4.29m along Y */}
           {inserts.map((ins, i) => {
             const scaleXm = W / (maxX - minX)
             const scaleYm = H / (maxY - minY)
-            const tw = ins.panels * PANEL_W_M * scaleXm
-            const th = TABLE_DEPTH_M * scaleYm
-            // HUOM: block-nimen "@30DEG" on paneelin ASENNUS-/KALLISTUSKULMA
-            // (kuinka jyrkässä kulmassa paneeli on aurinkoon nähden), EI
-            // pöydän kiertoa pohjapiirroksen X/Y-tasossa. Tämä tulkittiin
-            // aiemmin virheellisesti tasokierroksi, mikä siirsi/limitti
-            // pöytiä väärin — siksi ins.rot:ia EI käytetä piirrossa.
+            const tw = ins.panels * ELEMENT_W_M * scaleXm
+            const th = ELEMENT_ROW_DEPTH_M * scaleYm
+            // HUOM: block-nimen "@30DEG" on elementin oma ASENNUS-/
+            // KALLISTUSKULMA, EI pöydän kiertoa pohjapiirroksen X/Y-tasossa.
+            // Tämä tulkittiin aiemmin virheellisesti tasokierroksi, mikä
+            // siirsi/limitti pöytiä väärin — siksi ins.rot:ia EI käytetä piirrossa.
             return (
               <rect
                 key={`ins${i}`}
@@ -412,15 +411,15 @@ export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, 
             )
           })}
 
-          {/* Muun wattiluokan / erillisenä polygonina piirretyt paneelipöydät
-              (esim. layerit '665 Wp', '670 Wp', 'Extra panels'). Nämä eivät
-              tule INSERT-blokkeina kuten yllä olevat, vaan valmiina ääri-
-              viivoina DXF:stä — siksi ne piirretään suoraan <polygon>:ina
-              eikä lasketa x/y/panels-pohjaisesta suorakulmiosta. Sama
-              sininen tyyli kuin muillakin pöydillä, jotta ne eivät erotu
-              omana kategorianaan kartalla — ne OVAT paneelipöytiä, vain eri
-              tavalla merkittyjä DXF:ssä. */}
-          {panelAreas.map((pts, i) => (
+          {/* Muun kokoluokan / erillisenä polygonina piirretyt rakennus-
+              elementit. Nämä eivät tule INSERT-blokkeina kuten yllä olevat,
+              vaan valmiina ääriviivoina DXF:stä — siksi ne piirretään
+              suoraan <polygon>:ina eikä lasketa x/y/units-pohjaisesta
+              suorakulmiosta. Sama sininen tyyli kuin muillakin riveillä,
+              jotta ne eivät erotu omana kategorianaan kartalla — ne OVAT
+              samoja rakennuselementtejä, vain eri tavalla merkittyjä
+              DXF:ssä. */}
+          {elementAreas.map((pts, i) => (
             <polygon
               key={`pa${i}`}
               points={pts.map(p => p.join(',')).join(' ')}

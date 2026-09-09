@@ -25,26 +25,25 @@ export function parseDXF(text) {
   const ty = y => H - (y - minY) / (maxY - minY) * H
 
   // Parse entities
-  const pvAreas = []
-  // Aluejako-tason rajat KAHDESTI tallennettuna: kerran pvAreas-joukkoon
+  const siteAreas = []
+  // Aluejako-tason rajat KAHDESTI tallennettuna: kerran siteAreas-joukkoon
   // (piirtoa varten, ennallaan) ja erikseen tähän omaan taulukkoon —
   // findPinRow (shared.js) tarvitsee juuri Aluejako-rajat erillään
   // 'PVcase PV Area' -kentän ULKOREUNASTA, koska jälkimmäinen on koko
-  // paneelikentän oma (usein mutkikas/koverakin) ääriviiva, joka voi
+  // työmaa-alueen oma (usein mutkikas/koverakin) ääriviiva, joka voi
   // ylittää rivin ilman että kyseessä on oikeasti kaksi eri riviä/aluetta
   // — vain Aluejako-raja tarkoittaa aidosti eri nimettyä aluetta.
   const aluejako = []
   const roads = []
   const boundaries = []
-  const inserts = [] // panel tables (drawn as INSERT blocks)
-  const panelAreas = [] // panel tables drawn as raw polygons instead of INSERT
-                         // blocks — some sites (e.g. isoneva.dxf) mix panel
-                         // wattage classes, and the non-default classes come
-                         // through as LWPOLYLINE outlines on their own layer
-                         // ('665 Wp', '670 Wp', 'Extra panels') rather than as
-                         // '2P..' INSERT blocks. Skipping these silently
-                         // dropped whole rows of tables from the map even
-                         // though the DXF data for them was present and valid.
+  const inserts = [] // element rows (drawn as INSERT blocks)
+  const elementAreas = [] // element rows drawn as raw polygons instead of INSERT
+                         // blocks — some sites mix element size classes, and
+                         // the non-default classes come through as
+                         // LWPOLYLINE outlines on their own layer rather than
+                         // as INSERT blocks. Skipping these silently dropped
+                         // whole rows of elements from the map even though
+                         // the DXF data for them was present and valid.
   const rowNumbers = []
 
   let i = 0
@@ -88,11 +87,11 @@ export function parseDXF(text) {
           j += 2
         }
         if (pts.length > 2) {
-          if (layer === 'PVcase PV Area') pvAreas.push(pts)
-          else if (layer === 'Aluejako') { pvAreas.push(pts); aluejako.push(pts) }
+          if (layer === 'PVcase PV Area') siteAreas.push(pts)
+          else if (layer === 'Aluejako') { siteAreas.push(pts); aluejako.push(pts) }
           else if (layer === 'Road' || layer === 'PVcase Road') roads.push(pts)
           else if (layer === 'Aitaus') boundaries.push(pts)
-          else if (layer === '665 Wp' || layer === '670 Wp' || layer === 'Extra panels') panelAreas.push(pts)
+          else if (layer === '665 Wp' || layer === '670 Wp' || layer === 'Extra panels') elementAreas.push(pts)
         }
         i = j
         continue
@@ -115,8 +114,9 @@ export function parseDXF(text) {
           if (px >= minX && px <= maxX && py >= minY && py <= maxY) {
             const m = block.match(/2P(\d+)/)
             const panels = m ? parseInt(m[1]) : 22
-            // The "@30DEG" in the block name is the panel TILT angle (mounting angle),
-            // not a rotation in the XY plane — tables are laid out axis-aligned.
+            // The "@30DEG" in the block name is the element's own TILT angle
+            // (mounting angle), not a rotation in the XY plane — rows are
+            // laid out axis-aligned.
             inserts.push({ x: tx(px), y: ty(py), panels, rot: rot || 0, block })
           }
         }
@@ -152,12 +152,12 @@ export function parseDXF(text) {
     i++
   }
 
-  return { W, H, pvAreas, aluejako, roads, boundaries, inserts, panelAreas, rowNumbers, minX, minY, maxX, maxY }
+  return { W, H, siteAreas, aluejako, roads, boundaries, inserts, elementAreas, rowNumbers, minX, minY, maxX, maxY }
 }
 
 // ---------------------------------------------------------------------------
-// Paalutus (piling) support — paalukartat (esim. Isoneva) sisältävät VAIN
-// POINT-entiteettejä layerilla 'PVcase Poles Centres', EI tekstirivinumeroita.
+// Paalutus (piling) support — paalukartat sisältävät VAIN POINT-entiteettejä
+// layerilla 'PVcase Poles Centres', EI tekstirivinumeroita.
 // Rivitieto on kuitenkin piilossa jokaisen pisteen XDATA:ssa (group code
 // 1001 = kentän nimi, seuraava 1000 = arvo), kenttänä 'PVCaseBlockID'.
 // Tämä funktio lukee raa'at paalupisteet ja niiden XDATA:n. Rivien
@@ -223,7 +223,8 @@ export function parsePilePoints(text) {
 // groupPilesIntoRows() toimii suoraan kummallakin.
 // Kevyt CSV-muoto paalupisteille — UUSI MUOTO (pole_id,area,row_number,x,y).
 // Rivinumerot ja aluejako ovat nyt OIKEITA, työmaan omia rivinumeroita
-// (sama 'Address'-layerin numerointi kuin paneelipöydissä, esim. 1,3,5,7...),
+// (sama 'Address'-layerin numerointi kuin rakennuselementtien riveissä,
+// esim. 1,3,5,7...),
 // poimittu paikallisesti kahdeksasta erillisestä aluekohtaisesta
 // paalutuskartta-DXF:stä (CIRCLE-pisteet + lähin samalla Y-korkeudella oleva
 // rivinumero — sama periaate kuin findPinRow shared.js:ssä). EI enää tarvita

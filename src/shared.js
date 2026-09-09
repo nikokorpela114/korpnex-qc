@@ -3,28 +3,27 @@
 // (asentaja) välillä — tässä tiedostossa jotta kumpikaan ei tuo toistaan
 // suoraan (circular import -riski build-vaiheessa).
 
-export const PANEL_W_M = 1.15
-export const TABLE_DEPTH_M = 4.29
+export const ELEMENT_W_M = 1.15
+export const ELEMENT_ROW_DEPTH_M = 4.29
 
 export const KNOWN_SITES = [
-  { key: 'isoneva', label: 'Isoneva, Suonenjoki' },
-  { key: 'lamminneva', label: 'Lamminneva, Lappajärvi' },
+  { key: 'esimerkki', label: 'Esimerkkityömaa' },
 ]
 
 // Englanninkieliset käännökset (PDF + asentajanäkymä). Tallennetut arvot
 // (o.cat, o.sev) pysyvät suomeksi Supabasessa — vain näyttöteksti vaihtuu.
 export const CAT_EN = {
-  'Paneeli rikkoutunut': 'Panel broken',
-  'Paneeli väärinpäin, yläreuna': 'Panel upside down – top edge',
-  'Paneeli väärinpäin, alareuna': 'Panel upside down – bottom edge',
-  'Paneelikiinnikkeissä rakoja': 'Gaps in panel clamps',
+  'Elementti rikkoutunut': 'Element broken',
+  'Elementti väärinpäin, yläreuna': 'Element upside down – top edge',
+  'Elementti väärinpäin, alareuna': 'Element upside down – bottom edge',
+  'Kiinnikkeissä rakoja': 'Gaps in clamps',
   'Kiskon pultti löysällä': 'Rail bolt loose',
   'Kiskon pultti puuttuu': 'Rail bolt missing',
-  'Paneelikiinnikkeiden kiristysmomentit vajaat': 'Panel clamp torque insufficient',
+  'Kiinnikkeiden kiristysmomentit vajaat': 'Clamp torque insufficient',
   'Kiskot tasaamatta': 'Rails not aligned',
   'Niittejä puuttuu': 'Rivets missing',
   'Kannake vääntynyt tai rikki': 'Bracket bent or broken',
-  'DC-kouru katkaisematta': 'DC conduit not cut open',
+  'Kaapelikouru katkaisematta': 'Cable duct not cut open',
   'Tupla poraruuvit puuttuvat': 'Double drill screws missing',
   'Poraruuvi puuttuu': 'Drill screw missing',
   'Koropalojen suoristus': 'Spacer blocks need straightening',
@@ -41,11 +40,10 @@ export const SEV_EN = { Kriittinen: 'Critical', Huomio: 'Attention', Info: 'Info
 
 // HUOM: dxfParser.js tallentaa jokaiselle INSERT:lle ins.rot-kentän
 // block-nimen "@30DEG"-osasta (esim. "2P22@30DEG..."). Tämä EI ole
-// pöydän kierto pohjapiirroksen X/Y-tasossa — se on paneelin
-// asennus-/kallistuskulma (tuttu esim. "30 asteen kallistus" aurinko-
-// paneeliasennuksista), joka ei vaikuta pöydän sijaintiin tai muotoon
+// rivin kierto pohjapiirroksen X/Y-tasossa — se on elementin oma
+// asennus-/kallistuskulma, joka ei vaikuta rivin sijaintiin tai muotoon
 // ylhäältä katsottuna. Tätä kokeiltiin virheellisesti tulkita tasokiertona
-// kerran, mikä siirsi/limitti kaikki 1051 pöytää väärin — ins.rot:ia ei
+// kerran, mikä siirsi/limitti kaikki 1051 riviä väärin — ins.rot:ia ei
 // siis käytetä missään piirrossa tai osumatunnistuksessa.
 
 export const PDF_STR = {
@@ -63,7 +61,7 @@ export const PDF_STR = {
 // find which row the pin lands in and the nearest row-number label.
 //
 // HUOM: yksi "rivi" koostuu kartalla useasta erillisestä INSERT-lohkosta
-// (paneelipöydästä) peräkkäin samalla korkeudella, ja rivinumero on
+// (rakennuselementistä) peräkkäin samalla korkeudella, ja rivinumero on
 // merkitty vain rivin oikeaan päähän. Siksi emme voi laskea kohdepistettä
 // pelkän löydetyn yksittäisen lohkon reunasta — jos pinni osuu rivin
 // vasempaan/keskimmäiseen lohkoon, se piste voi olla geometrisesti
@@ -78,16 +76,16 @@ export function findPinRow(mapData, pin) {
   const sxm = mapData.W / (mapData.maxX - mapData.minX)
   const sym = mapData.H / (mapData.maxY - mapData.minY)
   const psx = pin.x * mapData.W, psy = pin.y * mapData.H
-  const th = TABLE_DEPTH_M * sym
+  const th = ELEMENT_ROW_DEPTH_M * sym
 
   // 1. Etsi insert-lohko johon pinni osuu. HUOM: ins.y on pöydän
   //    YLÄREUNA (todistetusti oikea konventio — vahvistettu vertaamalla
   //    aiemmin oikeasti toimineeseen Netlify-julkaisuun), pöytä ulottuu
   //    ALASPÄIN siitä. (ins.rot ei ole pöydän pohjapiirroskierto vaan
-  //    paneelin kallistuskulma — ei käytetä tässä.)
+  //    elementin oma kallistuskulma — ei käytetä tässä.)
   let hitIdx = -1
   mapData.inserts.forEach((ins, idx) => {
-    const tw = ins.panels * PANEL_W_M * sxm
+    const tw = ins.panels * ELEMENT_W_M * sxm
     if (psx >= ins.x - 3 && psx <= ins.x + tw + 3 && psy >= ins.y - 3 && psy <= ins.y + th + 3) hitIdx = idx
   })
   // Fallback: joillain työmailla rivit on aseteltu hyvin tiheään (ks.
@@ -101,7 +99,7 @@ export function findPinRow(mapData, pin) {
   if (hitIdx < 0) {
     let bestDist = Infinity
     mapData.inserts.forEach((ins, idx) => {
-      const tw = ins.panels * PANEL_W_M * sxm
+      const tw = ins.panels * ELEMENT_W_M * sxm
       if (psx < ins.x - 3 || psx > ins.x + tw + 3) return // X-suunnassa oltava edes lähellä pöytää
       const center = ins.y + th / 2
       const d = Math.abs(psy - center)
@@ -114,7 +112,7 @@ export function findPinRow(mapData, pin) {
 
   // 1b. Mitataan TODELLINEN rivi-väli tällä alueella heti, hit.x:n
   //     ympäriltä — käytetään sitä JOHDONMUKAISESTI kaikkialla (rowY,
-  //     targetY, labelYTol) kiinteän th:n (TABLE_DEPTH_M-oletus) sijaan.
+  //     targetY, labelYTol) kiinteän th:n (ELEMENT_ROW_DEPTH_M-oletus) sijaan.
   //     Aiemmin th:tä käytettiin rowY/targetY:hen mutta localPitch:iä vain
   //     labelYTol:iin — tämä epäjohdonmukaisuus sai targetY:n osumaan
   //     väärään kohtaan aina kun todellinen väli poikkesi th:sta, mikä
@@ -177,8 +175,8 @@ export function findPinRow(mapData, pin) {
   // Tarkistaa kulkeeko jokin "raja-viiva" kahden pisteen välistä. Tähän
   // lasketaan sekä tiet (mapData.roads) että Aluejako-tason aluerajat
   // (mapData.aluejako — eri numeroitujen alueiden väliset rajaviivat,
-  // esim. A5/A6-alueiden raja). HUOM: 'PVcase PV Area' (koko
-  // paneelikentän oma, usein mutkikas ULKOREUNA) EI ole mukana tässä —
+  // esim. A5/A6-alueiden raja). HUOM: koko työmaa-alueen oma, usein
+  // mutkikas ULKOREUNA EI ole mukana tässä —
   // se voi ylittää rivin ilman että kyseessä on oikeasti eri alue (ks.
   // keskustelu: pieni tien ylitys + kentän oma reunaviiva katkaisi rivin
   // 33:n virheellisesti Logistiikka/A6-alueella vaikka rivi jatkuu
@@ -246,7 +244,7 @@ export function findPinRow(mapData, pin) {
   }
 
   const sameY = mapData.inserts
-    .map((ins, idx) => ({ idx, ins, left: ins.x, right: ins.x + ins.panels * PANEL_W_M * sxm }))
+    .map((ins, idx) => ({ idx, ins, left: ins.x, right: ins.x + ins.panels * ELEMENT_W_M * sxm }))
     .filter(e => Math.abs(e.ins.y - hit.y) <= yTol)
     .sort((a, b) => a.left - b.left)
 
@@ -284,7 +282,7 @@ export function findPinRow(mapData, pin) {
   //    lähinkin on epäuskottavan kaukana (esim. toiselta puolelta karttaa).
   //    localPitch (mitattu vaiheessa 1b) käytetään sekä targetY:n keskitykseen
   //    että toleranssin pohjana — molemmat käyttävät nyt SAMAA mitattua
-  //    riviväliä, ei kiinteää TABLE_DEPTH_M-oletusta, jotta ne eivät voi
+  //    riviväliä, ei kiinteää ELEMENT_ROW_DEPTH_M-oletusta, jotta ne eivät voi
   //    ajautua ristiriitaan keskenään.
   const labelYTol = Math.max(th * 0.6, localPitch * 0.45)
   const maxLabelDist = Math.max(th * 4, localPitch * 3)
@@ -338,7 +336,7 @@ export function findPinRow(mapData, pin) {
 export function renderPinMapThumb(mapData, pin, outW = 700) {
   const sxm = mapData.W / (mapData.maxX - mapData.minX)
   const sym = mapData.H / (mapData.maxY - mapData.minY)
-  const th = TABLE_DEPTH_M * sym
+  const th = ELEMENT_ROW_DEPTH_M * sym
 
   const psx = pin.x * mapData.W, psy = pin.y * mapData.H
 
@@ -366,7 +364,7 @@ export function renderPinMapThumb(mapData, pin, outW = 700) {
     minX = psx; maxX = psx; minY = psy; maxY = psy
     highlightIdx.forEach(idx => {
       const ins = mapData.inserts[idx]
-      const left = ins.x, right = ins.x + ins.panels * PANEL_W_M * sxm
+      const left = ins.x, right = ins.x + ins.panels * ELEMENT_W_M * sxm
       if (left < minX) minX = left
       if (right > maxX) maxX = right
       if (ins.y < minY) minY = ins.y
@@ -393,16 +391,16 @@ export function renderPinMapThumb(mapData, pin, outW = 700) {
   const px = sx => (sx - svgX0) * kx, py = sy => (sy - svgY0) * ky
 
   ctx.fillStyle = 'rgba(200,223,245,0.85)'; ctx.strokeStyle = '#4a90d9'; ctx.lineWidth = 1
-  mapData.pvAreas.forEach(pts => {
+  mapData.siteAreas.forEach(pts => {
     ctx.beginPath(); pts.forEach(([x, y], i) => i === 0 ? ctx.moveTo(px(x), py(y)) : ctx.lineTo(px(x), py(y)))
     ctx.closePath(); ctx.fill(); ctx.stroke()
   })
 
   mapData.inserts.forEach((ins, idx) => {
-    const right = ins.x + ins.panels * PANEL_W_M * sxm
+    const right = ins.x + ins.panels * ELEMENT_W_M * sxm
     const left = ins.x
     if (right < svgX0 || left > svgX1 || ins.y + th < svgY0 || ins.y > svgY1) return // skip off-screen tables
-    const tw = ins.panels * PANEL_W_M * sxm * kx, thpx = TABLE_DEPTH_M * sym * ky
+    const tw = ins.panels * ELEMENT_W_M * sxm * kx, thpx = ELEMENT_ROW_DEPTH_M * sym * ky
     const isHi = highlightIdx.has(idx)
     ctx.fillStyle = isHi ? 'rgba(214,48,48,0.30)' : 'rgba(21,96,196,0.18)'
     ctx.strokeStyle = isHi ? '#d63030' : '#1560c4'
@@ -444,7 +442,7 @@ export function renderPinMapThumb(mapData, pin, outW = 700) {
 export function renderGroupMapImage(mapData, items) {
   const sxm = mapData.W / (mapData.maxX - mapData.minX)
   const sym = mapData.H / (mapData.maxY - mapData.minY)
-  const th = TABLE_DEPTH_M * sym
+  const th = ELEMENT_ROW_DEPTH_M * sym
 
   const pins = items.map(o => ({ x: o.pin.x * mapData.W, y: o.pin.y * mapData.H }))
 
@@ -466,7 +464,7 @@ export function renderGroupMapImage(mapData, items) {
   if (rowInsertIdxSet.size > 0) {
     const chainInserts = [...rowInsertIdxSet].map(i => mapData.inserts[i])
     const rowMinX = Math.min(...chainInserts.map(e => e.x))
-    const rowMaxX = Math.max(...chainInserts.map(e => e.x + e.panels * PANEL_W_M * sxm))
+    const rowMaxX = Math.max(...chainInserts.map(e => e.x + e.panels * ELEMENT_W_M * sxm))
     const rowMinY = Math.min(...chainInserts.map(e => e.y))
     const rowMaxY = Math.max(...chainInserts.map(e => e.y + th))
     minX = Math.min(rowMinX, ...pins.map(p => p.x))
@@ -515,14 +513,14 @@ export function renderGroupMapImage(mapData, items) {
   const px = sx => (sx - svgX0) * kx, py = sy => (sy - svgY0) * ky
 
   mctx.fillStyle = 'rgba(200,223,245,0.85)'; mctx.strokeStyle = '#4a90d9'; mctx.lineWidth = 1.2
-  mapData.pvAreas.forEach(pts => {
+  mapData.siteAreas.forEach(pts => {
     mctx.beginPath(); pts.forEach(([x, y2], i) => i === 0 ? mctx.moveTo(px(x), py(y2)) : mctx.lineTo(px(x), py(y2)))
     mctx.closePath(); mctx.fill(); mctx.stroke()
   })
 
   mapData.inserts.forEach((ins, idx) => {
-    const tw = ins.panels * PANEL_W_M * sxm * kx
-    const thpx = TABLE_DEPTH_M * sym * ky
+    const tw = ins.panels * ELEMENT_W_M * sxm * kx
+    const thpx = ELEMENT_ROW_DEPTH_M * sym * ky
     const isHi = rowInsertIdxSet.has(idx)
     mctx.fillStyle = isHi ? 'rgba(214,48,48,0.30)' : 'rgba(21,96,196,0.18)'
     mctx.strokeStyle = isHi ? '#d63030' : '#1560c4'

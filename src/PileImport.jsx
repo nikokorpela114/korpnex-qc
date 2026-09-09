@@ -10,7 +10,7 @@ import { KNOWN_SITES } from './shared.js'
 const BATCH_SIZE = 500
 
 export default function PileImport() {
-  const [siteKey, setSiteKey] = useState('isoneva')
+  const [siteKey, setSiteKey] = useState(KNOWN_SITES[0]?.key || '')
   const [busy, setBusy] = useState(false)
   const [log, setLog] = useState([])
   const [done, setDone] = useState(false)

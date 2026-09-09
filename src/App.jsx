@@ -8,13 +8,13 @@ import Dashboard from './Dashboard.jsx'
 import PileImport from './PileImport.jsx'
 import PaalutusView from './PaalutusView.jsx'
 import { subscribeToPush, sendPushNotification } from './push.js'
-import { PANEL_W_M, TABLE_DEPTH_M, KNOWN_SITES, CAT_EN, SEV_EN, PDF_STR, findPinRow, renderGroupMapImage, compressImage } from './shared.js'
+import { ELEMENT_W_M, ELEMENT_ROW_DEPTH_M, KNOWN_SITES, CAT_EN, SEV_EN, PDF_STR, findPinRow, renderGroupMapImage, compressImage } from './shared.js'
 
 const CATS = [
-  'Paneeli rikkoutunut', 'Paneeli väärinpäin, yläreuna', 'Paneeli väärinpäin, alareuna',
-  'Paneelikiinnikkeissä rakoja', 'Kiskon pultti löysällä', 'Kiskon pultti puuttuu',
-  'Paneelikiinnikkeiden kiristysmomentit vajaat', 'Kiskot tasaamatta', 'Niittejä puuttuu',
-  'Kannake vääntynyt tai rikki', 'DC-kouru katkaisematta', 'Tupla poraruuvit puuttuvat',
+  'Elementti rikkoutunut', 'Elementti väärinpäin, yläreuna', 'Elementti väärinpäin, alareuna',
+  'Kiinnikkeissä rakoja', 'Kiskon pultti löysällä', 'Kiskon pultti puuttuu',
+  'Kiinnikkeiden kiristysmomentit vajaat', 'Kiskot tasaamatta', 'Niittejä puuttuu',
+  'Kannake vääntynyt tai rikki', 'Kaapelikouru katkaisematta', 'Tupla poraruuvit puuttuvat',
   'Poraruuvi puuttuu', 'Koropalojen suoristus', 'Shimmi levy puuttuu',
   'Paalu pultti löysällä', 'Paalu pultti puuttuu', 'Siivous', 'Ristituki puuttuu',
   'Ristituki rauta tasaamatta', 'Suojakansi puuttuu', 'Muu asia'
@@ -46,13 +46,13 @@ export default function App() {
     return <PaalutusView />
   }
 
-  const [site, setSite] = useState('Isoneva, Suonenjoki')
+  const [site, setSite] = useState(KNOWN_SITES[0]?.label || '')
   const [inspector, setInspector] = useState('')
   const [rivi, setRivi] = useState('')
   const [obs, setObs] = useState([])
   const [mapData, setMapData] = useState(null)
   const [mapError, setMapError] = useState('')
-  const [currentSiteKey, setCurrentSiteKey] = useState('isoneva')
+  const [currentSiteKey, setCurrentSiteKey] = useState(KNOWN_SITES[0]?.key || '')
   const [gpsCoords, setGpsCoords] = useState(null)
   const [syncMsg, setSyncMsg] = useState('')
   const [pdfMode, setPdfMode] = useState(false)
@@ -598,7 +598,7 @@ export default function App() {
         doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(100, 100, 120)
         doc.text(T.location, M + 2, y); y += 4
         try {
-          const PANEL_W = 1.15, TABLE_D = 4.29
+          const ELEMENT_W = 1.15, ELEMENT_D = 4.29
           const sxm = mapData.W / (mapData.maxX - mapData.minX)
           const sym = mapData.H / (mapData.maxY - mapData.minY)
 
@@ -633,14 +633,14 @@ export default function App() {
           const px = sx => (sx - svgX0) * kx, py = sy => (sy - svgY0) * ky
 
           mctx.fillStyle = 'rgba(200,223,245,0.85)'; mctx.strokeStyle = '#4a90d9'; mctx.lineWidth = 1.2
-          mapData.pvAreas.forEach(pts => {
+          mapData.siteAreas.forEach(pts => {
             mctx.beginPath(); pts.forEach(([x,y2],i) => i===0 ? mctx.moveTo(px(x),py(y2)) : mctx.lineTo(px(x),py(y2)))
             mctx.closePath(); mctx.fill(); mctx.stroke()
           })
 
           mapData.inserts.forEach((ins) => {
-            const tw = ins.panels * PANEL_W * sxm * kx
-            const th = TABLE_D * sym * ky
+            const tw = ins.panels * ELEMENT_W * sxm * kx
+            const th = ELEMENT_D * sym * ky
             mctx.fillStyle = 'rgba(21,96,196,0.22)'
             mctx.strokeStyle = '#1560c4'
             mctx.lineWidth = 0.7
@@ -649,9 +649,9 @@ export default function App() {
             mctx.strokeRect(px(ins.x), py(ins.y), tw, th)
           })
 
-          // Muun wattiluokan / polygonina piirretyt paneelipöydät (665 Wp /
-          // 670 Wp / Extra panels) — ks. selitys MapView.jsx:ssä/dxfParser.js:ssä.
-          ;(mapData.panelAreas || []).forEach(pts => {
+          // Muun kokoluokan / polygonina piirretyt rakennuselementit —
+          // ks. selitys MapView.jsx:ssä/dxfParser.js:ssä.
+          ;(mapData.elementAreas || []).forEach(pts => {
             mctx.fillStyle = 'rgba(21,96,196,0.22)'
             mctx.strokeStyle = '#1560c4'
             mctx.lineWidth = 0.7
