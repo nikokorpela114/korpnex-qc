@@ -31,5 +31,5 @@ alter table observations add column if not exists type text;
 --    julkinen avain, service_role = Edge Functionit). Valvomon uusi
 --    sähköposti+salasana-kirjautuminen (Supabase Auth) on tässä vaiheessa
 --    vain käyttöliittymän portti — se EI muuta näitä oikeuksia, joten
---    kenttäsovellus (asentaja/paalutus) toimii täysin ennallaan.
+--    kenttäsovellus (asentaja) toimii täysin ennallaan.
 grant select, insert, update, delete on contractors to anon, service_role;

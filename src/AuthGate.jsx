@@ -1,9 +1,9 @@
 // src/AuthGate.jsx
 //
-// Jaettu kirjautumisportti KAIKILLE näkymille (Valvomo, asentaja, paalutus,
+// Jaettu kirjautumisportti KAIKILLE näkymille (Valvomo, asentaja,
 // tarkastaja). Korvaa vanhan Dashboard.jsx:n sisäisen AuthGaten sekä
-// InstallerView/PaalutusView:n nimi+PIN-kirjautumisen — jatkossa KAIKKI
-// kirjautuminen on oikea Supabase Auth -tili (sähköposti + salasana).
+// InstallerView:n nimi+PIN-kirjautumisen — jatkossa KAIKKI kirjautuminen
+// on oikea Supabase Auth -tili (sähköposti + salasana).
 //
 // Tekee neljä asiaa:
 //   1) Kirjautuminen / Rekisteröityminen (uusi yritys) / Salasanan palautus.
@@ -44,7 +44,7 @@ export async function describeFnError(error, data) {
   return error?.message || 'Tuntematon virhe'
 }
 
-const ROLE_LABEL = { admin: 'Ylläpitäjä', asentaja: 'Asentaja', paaluttaja: 'Paaluttaja' }
+const ROLE_LABEL = { admin: 'Ylläpitäjä', asentaja: 'Asentaja' }
 
 function Shell({ children }) {
   return (

@@ -5,16 +5,16 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react'
 import { sb } from './supabaseClient.js'
 import AuthGate, { describeFnError } from './AuthGate.jsx'
-import { typeLabel, extraLabel, PILE_TYPES, EXTRA_ACTIONS, buildRowExportFiles, orderPilesAlongRow } from './PaalutusView.jsx'
+import Diary from './Diary.jsx'
 
 const sevColor = { Kriittinen: '#b02828', Huomio: '#a06800', Info: '#1a7a45' }
 const sevBg = { Kriittinen: '#fde2e2', Huomio: '#fdf0d5', Info: '#dcefe3' }
 const REFRESH_MS = 30000
-const ROLE_LABEL = { admin: 'Ylläpitäjä', asentaja: 'Asentaja', paaluttaja: 'Paaluttaja' }
+const ROLE_LABEL = { admin: 'Ylläpitäjä', asentaja: 'Asentaja' }
 
 // Valvomon kirjautuminen hoidetaan jaetulla AuthGate-komponentilla
-// (src/AuthGate.jsx) — sama komponentti hoitaa myös asentaja/paalutus-
-// näkymien kirjautumisen. allowedRoles=['admin'] tarkoittaa että vain
+// (src/AuthGate.jsx) — sama komponentti hoitaa myös asentaja-näkymän
+// kirjautumisen. allowedRoles=['admin'] tarkoittaa että vain
 // pääkäyttäjä-roolin tilit pääsevät Valvomoon; muun roolin tilit näkevät
 // AuthGaten "väärä rooli" -ilmoituksen.
 export default function Dashboard() {
@@ -41,11 +41,14 @@ function DashboardInner({ session, profile, logout }) {
   const [siteFilter, setSiteFilter] = useState('')
   const [teamFilter, setTeamFilter] = useState('')
   const [search, setSearch] = useState('')
-  const [tab, setTab] = useState('open') // 'open' | 'fixed' | 'hidden' | 'nearmiss' | 'teams' | 'contractors' | 'piling'
+  const [tab, setTab] = useState('open') // 'open' | 'fixed' | 'hidden' | 'nearmiss' | 'teams' | 'contractors' | 'sites' | 'users' | 'diary'
   const [selected, setSelected] = useState(new Set())
   const [busy, setBusy] = useState(false)
   const [newTeamName, setNewTeamName] = useState('')
   const [lightboxSrc, setLightboxSrc] = useState(null) // korjauskuvan suurennettu näkymä
+
+  // --- Päiväkirja-välilehden tila (työmaa = päiväkirjan "projekti", ks. Diary.jsx) ---
+  const [diarySiteFilter, setDiarySiteFilter] = useState('')
 
   // --- Urakoitsijat-välilehden tila ---
   const [newContractorName, setNewContractorName] = useState('')
@@ -59,28 +62,15 @@ function DashboardInner({ session, profile, logout }) {
   const [newUserPassword, setNewUserPassword] = useState('')
   const [newUserRole, setNewUserRole] = useState('asentaja')
 
-  // --- Paalutus-välilehden tila ---
-  const [pileOperators, setPileOperators] = useState([])
-  const [pileRowSummary, setPileRowSummary] = useState([])
-  const [pileSiteFilter, setPileSiteFilter] = useState('')
-  const [expandedRowKey, setExpandedRowKey] = useState(null)
-  const [expandedRowPiles, setExpandedRowPiles] = useState(null)
-  const [editPileId, setEditPileId] = useState(null)
-  const [editPileType, setEditPileType] = useState('')
-  const [editPileExtra, setEditPileExtra] = useState('')
-  const [editPileKn, setEditPileKn] = useState('')
-
   const load = useCallback(async () => {
     const [
       { data: o, error: oErr }, { data: i, error: iErr }, { data: tm, error: tErr },
-      { data: po, error: poErr }, { data: prs, error: prsErr }, { data: co, error: cErr },
+      { data: co, error: cErr },
       { data: st, error: stErr }, { data: cmp, error: cmpErr },
     ] = await Promise.all([
       sb.from('observations').select('*').order('created_at', { ascending: false }).limit(3000),
       sb.from('installers').select('*').order('name'),
       sb.from('teams').select('*').order('name'),
-      sb.from('pile_operators').select('*').order('name'),
-      sb.from('pile_rows_summary').select('*').order('area').order('row_number'),
       sb.from('contractors').select('*').order('name'),
       sb.from('sites').select('*').order('label'),
       sb.from('companies').select('*').eq('id', companyId).maybeSingle(),
@@ -88,20 +78,16 @@ function DashboardInner({ session, profile, logout }) {
     if (oErr) console.error('Dashboard: observations fetch failed', oErr)
     if (iErr) console.error('Dashboard: installers fetch failed', iErr)
     if (tErr) console.error('Dashboard: teams fetch failed', tErr)
-    if (poErr) console.error('Dashboard: pile_operators fetch failed', poErr)
-    if (prsErr) console.error('Dashboard: pile_rows_summary fetch failed', prsErr)
     if (cErr) console.error('Dashboard: contractors fetch failed', cErr)
     if (stErr) console.error('Dashboard: sites fetch failed', stErr)
     if (cmpErr) console.error('Dashboard: company fetch failed', cmpErr)
     setObs(o || [])
     setInstallers(i || [])
     setTeams(tm || [])
-    setPileOperators(po || [])
-    setPileRowSummary(prs || [])
     setContractors(co || [])
     setSites(st || [])
     setCompany(cmp || null)
-    setPileSiteFilter(prev => prev || st?.[0]?.id || '')
+    setDiarySiteFilter(prev => prev || st?.[0]?.id || '')
     setLoading(false)
     setLastRefresh(new Date())
   }, [companyId])
@@ -281,7 +267,7 @@ function DashboardInner({ session, profile, logout }) {
     load()
   }
   async function deleteSite(id) {
-    if (!window.confirm('Poistetaanko työmaa? Sen kartta/DXF ja paalutiedot eivät poistu automaattisesti.')) return
+    if (!window.confirm('Poistetaanko työmaa? Sen kartta/DXF ei poistu automaattisesti.')) return
     const { error } = await sb.from('sites').delete().eq('id', id)
     if (error) { alert('Poisto epäonnistui: ' + error.message); return }
     load()
@@ -370,90 +356,6 @@ function DashboardInner({ session, profile, logout }) {
     load()
   }
 
-  // --- Paalutus: paaluttajien hallinta (uudet tilit luodaan Käyttäjät-
-  // välilehdellä roolilla "Paaluttaja" — he ilmestyvät tähän listaan
-  // automaattisesti ensimmäisen kirjautumisen jälkeen) ---
-  async function deletePileOperator(op) {
-    if (!window.confirm(`Poistetaanko paaluttaja ${op.name}?`)) return
-    const { error } = await sb.from('pile_operators').delete().eq('id', op.id)
-    if (error) { alert('Poisto epäonnistui: ' + error.message); return }
-    load()
-  }
-
-  // --- Paalutus: rivin laajennus (näyttää saman sisällön kuin "Rivi valmis" -vienti) ---
-  async function toggleRowExpand(area, rowNumber) {
-    const key = `${area}__${rowNumber}`
-    if (expandedRowKey === key) { setExpandedRowKey(null); setExpandedRowPiles(null); return }
-    setExpandedRowKey(key)
-    setExpandedRowPiles(null)
-    setEditPileId(null)
-    const site = pileSiteFilter || sites[0]?.id
-    const { data, error } = await sb.from('piles').select('*').eq('site', site).eq('area', area).eq('row_number', rowNumber).order('id')
-    // Sama fyysinen pääsuunta-lajittelu kuin paaluttajan näkymässä (PaalutusView),
-    // jotta valvomon numerointi ja vienti täsmäävät paaluttajan omaan näkymään.
-    setExpandedRowPiles(error ? [] : orderPilesAlongRow(data || []))
-  }
-
-  // Tyhjentää KOKO avoinna olevan rivin — kaikki sen paalut palautuvat
-  // merkitsemättömiksi (esim. jos paaluttaja teki virheen koko rivillä).
-  async function resetWholeRow(area, rowNumber) {
-    if (!window.confirm(`Tyhjennetäänkö KOKO rivi ${rowNumber} (${area})? Kaikki sen paalujen merkinnät poistuvat.`)) return
-    const site = pileSiteFilter || sites[0]?.id
-    const { error } = await sb.from('piles').update({
-      pile_type: null, extra_action: null, pull_test_kn: null,
-      status: 'open', installed_by: null, installed_at: null
-    }).eq('site', site).eq('area', area).eq('row_number', rowNumber)
-    if (error) { alert('Tyhjennys epäonnistui: ' + error.message); return }
-    const { data: refreshed } = await sb.from('piles').select('*').eq('site', site).eq('area', area).eq('row_number', rowNumber).order('id')
-    setExpandedRowPiles(orderPilesAlongRow(refreshed || []))
-    load()
-  }
-
-  // Yksittäisen paalun tyhjennys (palauttaa merkitsemättömäksi)
-  async function resetPile(pileId) {
-    if (!window.confirm('Tyhjennetäänkö tämän paalun merkintä?')) return
-    const { data, error } = await sb.from('piles').update({
-      pile_type: null, extra_action: null, pull_test_kn: null,
-      status: 'open', installed_by: null, installed_at: null
-    }).eq('id', pileId).select().single()
-    if (error) { alert('Tyhjennys epäonnistui: ' + error.message); return }
-    setExpandedRowPiles(prev => prev.map(p => p.id === pileId ? data : p))
-  }
-
-  // Yksittäisen paalun muokkaus (koko, lisätoimenpide, vetotesti)
-  function startEditPile(pile) {
-    setEditPileId(pile.id)
-    setEditPileType(pile.pile_type || '')
-    setEditPileExtra(pile.extra_action || '')
-    setEditPileKn(pile.pull_test_kn ?? '')
-  }
-  async function saveEditPile(pileId) {
-    const { data, error } = await sb.from('piles').update({
-      pile_type: editPileType || null,
-      extra_action: editPileExtra || null,
-      pull_test_kn: editPileKn === '' ? null : parseFloat(editPileKn),
-      status: (editPileType || editPileExtra) ? 'done' : 'open',
-    }).eq('id', pileId).select().single()
-    if (error) { alert('Tallennus epäonnistui: ' + error.message); return }
-    setExpandedRowPiles(prev => prev.map(p => p.id === pileId ? data : p))
-    setEditPileId(null)
-  }
-
-  // Lataa rivin PDF + Excel suoraan tiedostoina (työpöytäkäyttö — ei
-  // jakovalikkoa, samat tiedostot kuin paaluttajan puhelimessa)
-  async function downloadRowFiles(area, rowNumber) {
-    if (!expandedRowPiles || expandedRowPiles.length === 0) return
-    const siteLabel = sites.find(s => s.id === (pileSiteFilter || sites[0]?.id))?.label || pileSiteFilter
-    const { pdfBlob, xlsxBlob, baseName } = await buildRowExportFiles(expandedRowPiles, area, rowNumber, siteLabel)
-    for (const [blob, name] of [[pdfBlob, `${baseName}.pdf`], [xlsxBlob, `${baseName}.xlsx`]]) {
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a'); a.href = url; a.download = name
-      document.body.appendChild(a); a.click(); document.body.removeChild(a)
-      setTimeout(() => URL.revokeObjectURL(url), 3000)
-    }
-  }
-
-
   return (
     <div style={{ minHeight: '100vh', background: '#f6f7fb', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
       <div style={{ background: '#070b17', padding: '20px 30px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
@@ -541,12 +443,12 @@ function DashboardInner({ session, profile, logout }) {
             <TabButton active={tab === 'contractors'} onClick={() => { setTab('contractors'); clearSelection() }}>Urakoitsijat</TabButton>
             <TabButton active={tab === 'sites'} onClick={() => { setTab('sites'); clearSelection() }}>Työmaat</TabButton>
             <TabButton active={tab === 'users'} onClick={() => { setTab('users'); clearSelection(); loadUsers() }}>Käyttäjät</TabButton>
-            <TabButton active={tab === 'piling'} onClick={() => { setTab('piling'); clearSelection() }}>Paalutus</TabButton>
+            <TabButton active={tab === 'diary'} onClick={() => { setTab('diary'); clearSelection() }}>📔 Päiväkirja</TabButton>
           </div>
         </div>
 
         {/* Massatoimintopalkki */}
-        {selected.size > 0 && tab !== 'teams' && tab !== 'piling' && tab !== 'contractors' && tab !== 'users' && tab !== 'sites' && (
+        {selected.size > 0 && tab !== 'teams' && tab !== 'diary' && tab !== 'contractors' && tab !== 'users' && tab !== 'sites' && (
           <div style={{ position: 'sticky', top: 12, zIndex: 10, background: '#fff', border: '1px solid #d0d5e8', borderRadius: 12, padding: '10px 16px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 12, boxShadow: '0 4px 16px rgba(20,30,80,0.10)' }}>
             <span style={{ fontSize: 13, fontWeight: 700, color: '#0d1a6e' }}>{selected.size} valittu</span>
             <div style={{ flex: 1 }} />
@@ -907,7 +809,7 @@ function DashboardInner({ session, profile, logout }) {
             <div style={{ ...cardStyle, padding: 18 }}>
               <div style={{ fontWeight: 700, fontSize: 14, color: '#0d1a6e', marginBottom: 10 }}>+ Uusi käyttäjä</div>
               <div style={{ fontSize: 12, color: '#6670a0', marginBottom: 10 }}>
-                Luo tunnus toiselle yrityksesi käyttäjälle (työnjohtaja, asentaja tai paaluttaja) — hän voi kirjautua näillä tiedoilla heti (ei vaadi sähköpostin vahvistusta).
+                Luo tunnus toiselle yrityksesi käyttäjälle (työnjohtaja tai asentaja) — hän voi kirjautua näillä tiedoilla heti (ei vaadi sähköpostin vahvistusta).
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <input
@@ -924,7 +826,6 @@ function DashboardInner({ session, profile, logout }) {
                 />
                 <select value={newUserRole} onChange={e => setNewUserRole(e.target.value)} style={selectStyle}>
                   <option value="asentaja">Asentaja</option>
-                  <option value="paaluttaja">Paaluttaja</option>
                   <option value="admin">Ylläpitäjä (Valvomo)</option>
                 </select>
                 {userErr && <div style={{ color: '#d63030', fontSize: 12.5 }}>{userErr}</div>}
@@ -932,7 +833,7 @@ function DashboardInner({ session, profile, logout }) {
                   Luo käyttäjä
                 </button>
                 <div style={{ fontSize: 11, color: '#9aa2c0' }}>
-                  Käyttäjä voi itse vaihtaa tämän salasanan kirjautumissivun "Unohtuiko salasana?" -linkistä. Asentaja/Paaluttaja-tilit ilmestyvät Tiimit/Paalutus-välilehdille automaattisesti kun he kirjautuvat ensimmäistä kertaa.
+                  Käyttäjä voi itse vaihtaa tämän salasanan kirjautumissivun "Unohtuiko salasana?" -linkistä. Asentaja-tilit ilmestyvät Tiimit-välilehdelle automaattisesti kun he kirjautuvat ensimmäistä kertaa.
                 </div>
               </div>
             </div>
@@ -967,154 +868,29 @@ function DashboardInner({ session, profile, logout }) {
           </div>
         )}
 
-        {tab === 'piling' && (
-          <div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 16, marginBottom: 20 }}>
-              <div style={{ ...cardStyle, padding: 20 }}>
-                <div style={{ fontWeight: 700, fontSize: 15, color: '#0d1a6e', marginBottom: 14 }}>Paaluttajat</div>
-                {pileOperators.length === 0 && <div style={{ fontSize: 13, color: '#9aa2c0', marginBottom: 10 }}>Ei paaluttajia vielä</div>}
-                {pileOperators.map(op => (
-                  <div key={op.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '9px 0', borderBottom: '1px solid #f4f5fa', gap: 10 }}>
-                    <span style={{ fontSize: 14 }}>{op.name}</span>
-                    <button onClick={() => deletePileOperator(op)} title="Poista paaluttaja" style={{ background: 'none', border: 'none', color: '#b02828', fontSize: 15, cursor: 'pointer', padding: '2px 4px' }}>🗑️</button>
-                  </div>
-                ))}
-                <div style={{ fontSize: 12, color: '#9aa2c0', marginTop: 18, lineHeight: 1.5 }}>
-                  Uudet paaluttajat luodaan <b>Käyttäjät</b>-välilehdellä (rooli: Paaluttaja) — he ilmestyvät tähän listaan automaattisesti ensimmäisen kirjautumisen jälkeen.
-                </div>
-              </div>
-            </div>
-
-            <div style={{ ...cardStyle, padding: 20 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-                <div style={{ fontWeight: 700, fontSize: 15, color: '#0d1a6e' }}>Paalutuksen eteneminen</div>
-                <select value={pileSiteFilter} onChange={e => setPileSiteFilter(e.target.value)} style={selectStyle}>
+        {tab === 'diary' && (
+          <div style={{ ...cardStyle, padding: 0, overflow: 'hidden', maxWidth: 480, margin: '0 auto' }}>
+            {sites.length > 1 && (
+              <div style={{ padding: '14px 16px 0' }}>
+                <select value={diarySiteFilter} onChange={e => setDiarySiteFilter(e.target.value)} style={selectStyle}>
                   {sites.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
                 </select>
               </div>
-
-              {pileRowSummary.length === 0 && <EmptyState text="Ei paalutietoja — onko tuonti (?paalutuonti) ajettu?" />}
-
-              {Object.entries(
-                pileRowSummary.reduce((acc, r) => {
-                  (acc[r.area] = acc[r.area] || []).push(r); return acc
-                }, {})
-              ).map(([area, rows]) => {
-                const totalPiles = rows.reduce((s, r) => s + r.total_piles, 0)
-                const donePiles = rows.reduce((s, r) => s + r.done_piles, 0)
-                const doneRows = rows.filter(r => r.row_complete).length
-                return (
-                  <div key={area} style={{ marginBottom: 22 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                      <div style={{ fontWeight: 700, fontSize: 14, color: '#0d1a6e' }}>{area}</div>
-                      <div style={{ fontSize: 12.5, color: '#6670a0' }}>{doneRows}/{rows.length} riviä · {donePiles}/{totalPiles} paalua</div>
-                    </div>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                      {rows.map(r => {
-                        const key = `${area}__${r.row_number}`
-                        const isOpen = expandedRowKey === key
-                        return (
-                          <div key={key} style={{ display: 'contents' }}>
-                            <button
-                              onClick={() => toggleRowExpand(area, r.row_number)}
-                              style={{
-                                padding: '6px 12px', borderRadius: 8, fontSize: 12.5, cursor: 'pointer',
-                                border: isOpen ? '1.5px solid #1560c4' : '1px solid #dfe2f0',
-                                background: r.row_complete ? '#dcefe3' : '#f6f7fb',
-                                color: r.row_complete ? '#1a7a50' : '#333',
-                                fontWeight: isOpen ? 700 : 500,
-                              }}
-                            >
-                              Rivi {r.row_number} · {r.done_piles}/{r.total_piles}{r.row_complete ? ' ✅' : ''}
-                            </button>
-                          </div>
-                        )
-                      })}
-                    </div>
-
-                    {rows.some(r => `${area}__${r.row_number}` === expandedRowKey) && (
-                      <div style={{ marginTop: 10, background: '#f9fafc', border: '1px solid #e5e8f2', borderRadius: 10, padding: 14, overflowX: 'auto' }}>
-                        {expandedRowPiles == null ? (
-                          <div style={{ fontSize: 13, color: '#9aa2c0' }}>Ladataan…</div>
-                        ) : (
-                          <>
-                            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginBottom: 8 }}>
-                              <button
-                                onClick={() => downloadRowFiles(area, Number(expandedRowKey.split('__')[1]))}
-                                style={{ background: 'none', border: '1px solid #b8c0e8', color: '#1560c4', borderRadius: 6, padding: '5px 10px', fontSize: 12, cursor: 'pointer' }}
-                              >
-                                ⬇️ Lataa PDF + Excel
-                              </button>
-                              <button
-                                onClick={() => resetWholeRow(area, Number(expandedRowKey.split('__')[1]))}
-                                style={{ background: 'none', border: '1px solid #e0b0b0', color: '#b02828', borderRadius: 6, padding: '5px 10px', fontSize: 12, cursor: 'pointer' }}
-                              >
-                                🗑️ Tyhjennä koko rivi
-                              </button>
-                            </div>
-                            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-                              <thead>
-                                <tr>
-                                  <th style={thStyle}>#</th>
-                                  <th style={thStyle}>Koko</th>
-                                  <th style={thStyle}>Lisätoimenpide</th>
-                                  <th style={thStyle}>Vetotesti kN</th>
-                                  <th style={thStyle}>Asentaja</th>
-                                  <th style={thStyle}>Tila</th>
-                                  <th style={thStyle}></th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {expandedRowPiles.map((p, idx) => (
-                                  editPileId === p.id ? (
-                                    <tr key={p.id} style={{ background: '#eef1ff' }}>
-                                      <td style={tdStyle}>{idx + 1}</td>
-                                      <td style={tdStyle}>
-                                        <select value={editPileType} onChange={e => setEditPileType(e.target.value)} style={{ ...selectStyle, padding: '4px 8px', fontSize: 12.5 }}>
-                                          <option value="">–</option>
-                                          {PILE_TYPES.map(t => <option key={t.code} value={t.code}>{t.label}</option>)}
-                                        </select>
-                                      </td>
-                                      <td style={tdStyle}>
-                                        <select value={editPileExtra} onChange={e => setEditPileExtra(e.target.value)} style={{ ...selectStyle, padding: '4px 8px', fontSize: 12.5 }}>
-                                          {EXTRA_ACTIONS.map(a => <option key={a.code} value={a.code}>{a.label}</option>)}
-                                        </select>
-                                      </td>
-                                      <td style={tdStyle}>
-                                        <input type="number" value={editPileKn} onChange={e => setEditPileKn(e.target.value)} style={{ ...selectStyle, padding: '4px 8px', fontSize: 12.5, width: 70 }} />
-                                      </td>
-                                      <td style={tdStyle}>{p.installed_by || '–'}</td>
-                                      <td style={tdStyle}>{p.status === 'done' ? '✅' : '—'}</td>
-                                      <td style={{ ...tdStyle, whiteSpace: 'nowrap' }}>
-                                        <button onClick={() => saveEditPile(p.id)} style={{ background: '#1a7a45', color: '#fff', border: 'none', borderRadius: 6, padding: '4px 8px', fontSize: 12, cursor: 'pointer', marginRight: 4 }}>✓</button>
-                                        <button onClick={() => setEditPileId(null)} style={{ background: '#fff', border: '1px solid #ccc', borderRadius: 6, padding: '4px 8px', fontSize: 12, cursor: 'pointer' }}>✕</button>
-                                      </td>
-                                    </tr>
-                                  ) : (
-                                    <tr key={p.id}>
-                                      <td style={tdStyle}>{idx + 1}</td>
-                                      <td style={tdStyle}>{typeLabel(p.pile_type) || '–'}</td>
-                                      <td style={tdStyle}>{extraLabel(p.extra_action) || '–'}</td>
-                                      <td style={tdStyle}>{p.pull_test_kn ?? '–'}</td>
-                                      <td style={tdStyle}>{p.installed_by || '–'}</td>
-                                      <td style={tdStyle}>{p.status === 'done' ? '✅' : '—'}</td>
-                                      <td style={{ ...tdStyle, whiteSpace: 'nowrap' }}>
-                                        <button onClick={() => startEditPile(p)} title="Muokkaa" style={{ background: 'none', border: 'none', color: '#1560c4', fontSize: 13, cursor: 'pointer', padding: '2px 6px' }}>✏️</button>
-                                        <button onClick={() => resetPile(p.id)} title="Tyhjennä" style={{ background: 'none', border: 'none', color: '#b02828', fontSize: 13, cursor: 'pointer', padding: '2px 6px' }}>🗑️</button>
-                                      </td>
-                                    </tr>
-                                  )
-                                ))}
-                              </tbody>
-                            </table>
-                          </>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                )
-              })}
-            </div>
+            )}
+            {sites.length === 0 ? (
+              <div style={{ padding: 20 }}>
+                <EmptyState text="Ei työmaita — luo yksi Työmaat-välilehdellä, jotta Päiväkirja voidaan avata sille." />
+              </div>
+            ) : (
+              <div style={{ height: 640, display: 'flex', flexDirection: 'column' }}>
+                <Diary
+                  session={session}
+                  profile={profile}
+                  siteId={diarySiteFilter || sites[0]?.id}
+                  siteLabel={sites.find(s => s.id === (diarySiteFilter || sites[0]?.id))?.label || ''}
+                />
+              </div>
+            )}
           </div>
         )}
       </div>

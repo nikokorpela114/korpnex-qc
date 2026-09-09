@@ -6,22 +6,14 @@ import { sb } from './supabaseClient.js'
 import AuthGate from './AuthGate.jsx'
 import InstallerView from './InstallerView.jsx'
 import Dashboard from './Dashboard.jsx'
-import PileImport from './PileImport.jsx'
-import PaalutusView from './PaalutusView.jsx'
 import Diary from './Diary.jsx'
 import { subscribeToPush, sendPushNotification } from './push.js'
 import { ELEMENT_W_M, ELEMENT_ROW_DEPTH_M, CAT_EN, SEV_EN, PDF_STR, findPinRow, renderGroupMapImage, compressImage } from './shared.js'
 
-const CATS = [
-  'Elementti rikkoutunut', 'Elementti väärinpäin, yläreuna', 'Elementti väärinpäin, alareuna',
-  'Kiinnikkeissä rakoja', 'Kiskon pultti löysällä', 'Kiskon pultti puuttuu',
-  'Kiinnikkeiden kiristysmomentit vajaat', 'Kiskot tasaamatta', 'Niittejä puuttuu',
-  'Kannake vääntynyt tai rikki', 'Kaapelikouru katkaisematta', 'Tupla poraruuvit puuttuvat',
-  'Poraruuvi puuttuu', 'Koropalojen suoristus', 'Shimmi levy puuttuu',
-  'Paalu pultti löysällä', 'Paalu pultti puuttuu', 'Siivous', 'Ristituki puuttuu',
-  'Ristituki rauta tasaamatta', 'Suojakansi puuttuu', 'Muu asia'
-]
-
+// Kiinteä vikaluokkalista poistettu — rakennustyömailla vika voi olla
+// mitä vain, joten käyttäjä kirjoittaa vian suoraan tekstikenttään (ks. o.cat
+// alla). Vanhat, jo tallennetut havainnot säilyttävät alkuperäisen
+// kategoriatekstinsä ennallaan.
 let idCounter = 0
 const DRAFT_KEY = 'korpnex_qc_draft_v1'
 
@@ -36,18 +28,6 @@ export default function App() {
   if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('valvomo')) {
     return <Dashboard />
   }
-  // ?paalutuonti — kertaluontoinen (uudelleenajettava) admin-sivu paalukartta-
-  // DXF:n tuontiin piles-tauluun. Ei linkitetty näkyvästä valikosta.
-  if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('paalutuonti')) {
-    return <PileImport />
-  }
-  // ?paalutus — paalutajien oma näkymä. Täysin erillinen ?asentaja-
-  // näkymästä: oma komponentti, oma kirjautuminen, oma data (piles-taulu,
-  // ei observations).
-  if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('paalutus')) {
-    return <PaalutusView />
-  }
-
   // Oletusnäkymä (ei query-parametria) = tarkastajan sovellus. Moniyritys-
   // versiossa tämäkin vaatii oikean kirjautumisen — tarkastaja on samalla
   // yrityksen admin-tili (samat tunnukset kuin Valvomoon).
@@ -268,18 +248,19 @@ function InspectorApp({ session, profile, logout }) {
 
   function addObs() {
     const id = ++idCounter
-    setObs(prev => [...prev, { id, cat: CATS[0], sev: 'Huomio', note: '', muu: '', type: 'vika', photos: [], pin: null, db_id: null, createdAt: new Date().toISOString() }])
+    setObs(prev => [...prev, { id, cat: '', sev: 'Huomio', note: '', muu: '', type: 'vika', photos: [], pin: null, db_id: null, createdAt: new Date().toISOString() }])
   }
 
   // Vaihtaa havainnon "Vika"/"Läheltäpiti" -tyyppiä. Läheltäpiti-ilmoituksilla
-  // ei ole vikaluokkaa (CATS) — cat-kenttä asetetaan pelkäksi "Läheltäpiti"-
+  // ei ole vapaata vikatekstiä — cat-kenttä asetetaan pelkäksi "Läheltäpiti"-
   // vakioksi, jotta olemassa oleva ryhmittely/PDF-koodi (jotka ryhmittelevät
   // o.cat:in mukaan) toimii ilman erillistä logiikkaa. Takaisin "Vika"-
-  // tyyppiin vaihdettaessa cat palautetaan listan ensimmäiseen vaihtoehtoon.
+  // tyyppiin vaihdettaessa cat tyhjennetään, jotta käyttäjä kirjoittaa sen
+  // itse uudestaan.
   function setObsType(id, type) {
     setObs(prev => prev.map(o => {
       if (o.id !== id) return o
-      const updated = { ...o, type, cat: type === 'laheltapiti' ? 'Läheltäpiti' : CATS[0], muu: '' }
+      const updated = { ...o, type, cat: type === 'laheltapiti' ? 'Läheltäpiti' : '', muu: '' }
       const { site: s, inspector: ins, rivi: r } = metaRef.current
       saveObs(updated, s, ins, r)
       return updated
@@ -522,7 +503,7 @@ function InspectorApp({ session, profile, logout }) {
       for (let gi = 0; gi < groups.length; gi++) {
         const g = groups[gi]
         if (gi > 0) { doc.addPage(); y = 18 }
-        const catLabel = lang === 'en' ? (CAT_EN[g.cat] || g.cat) : g.cat
+        const catLabel = (lang === 'en' ? (CAT_EN[g.cat] || g.cat) : g.cat) || (lang === 'en' ? 'Fault' : 'Vika')
         const worstSev = g.items.some(o => o.sev === 'Kriittinen') ? 'Kriittinen'
           : g.items.some(o => o.sev === 'Huomio') ? 'Huomio' : 'Info'
         const col = sevCol[worstSev] || [80, 80, 80]
@@ -611,9 +592,9 @@ function InspectorApp({ session, profile, logout }) {
     for (let i = 0; i < obs.length; i++) {
       const o = obs[i]
       if (i > 0) { doc.addPage(); y = 18 }
-      const catLabel = lang === 'en' ? (CAT_EN[o.cat] || o.cat) : o.cat
+      const catLabel = (lang === 'en' ? (CAT_EN[o.cat] || o.cat) : o.cat) || (lang === 'en' ? 'Fault' : 'Vika')
       const sevLabel = lang === 'en' ? (SEV_EN[o.sev] || o.sev) : o.sev
-      const lbl = o.cat === 'Muu asia' && o.muu ? `${T.other} – ${o.muu}` : catLabel
+      const lbl = catLabel
       const col = sevCol[o.sev] || [80, 80, 80]
       doc.setFillColor(...col)
       doc.roundedRect(M, y, CW, 8, 1.5, 1.5, 'F')
@@ -939,16 +920,12 @@ function InspectorApp({ session, profile, logout }) {
                   </div>
                 </div>
 
-                {/* Category — vain vika-tyyppisillä havainnoilla */}
+                {/* Category — vain vika-tyyppisillä havainnoilla. Vapaa tekstikenttä,
+                    ei kiinteää luokkalistaa, koska työmailla vika voi olla mitä vain. */}
                 {(o.type || 'vika') === 'vika' ? (
                   <div>
                     <div style={labelStyle}>Vika</div>
-                    <select style={selectStyle} value={o.cat} onChange={e => updateObs(o.id, 'cat', e.target.value)}>
-                      {CATS.map(c => <option key={c}>{c}</option>)}
-                    </select>
-                    {o.cat === 'Muu asia' && (
-                      <input style={{ ...inputStyle, marginTop: 6 }} placeholder="Kirjoita havainto..." value={o.muu} onChange={e => updateObs(o.id, 'muu', e.target.value)} />
-                    )}
+                    <input style={inputStyle} placeholder="Kirjoita havaittu vika, esim. 'Kaapelointi vaurioitunut'..." value={o.cat} onChange={e => updateObs(o.id, 'cat', e.target.value)} />
                   </div>
                 ) : (
                   <div>
