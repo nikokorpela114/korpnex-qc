@@ -131,6 +131,7 @@ export default function App() {
   async function saveObs(o, currentSite, currentInspector, currentRivi) {
     const data = {
       cat: o.cat, sev: o.sev, note: o.note, muu: o.muu,
+      type: o.type || 'vika',
       pin_x: o.pin?.x ?? null, pin_y: o.pin?.y ?? null,
       site: currentSite, inspector: currentInspector, rivi: currentRivi,
       local_id: o.id,
@@ -235,7 +236,22 @@ export default function App() {
 
   function addObs() {
     const id = ++idCounter
-    setObs(prev => [...prev, { id, cat: CATS[0], sev: 'Huomio', note: '', muu: '', photos: [], pin: null, db_id: null, createdAt: new Date().toISOString() }])
+    setObs(prev => [...prev, { id, cat: CATS[0], sev: 'Huomio', note: '', muu: '', type: 'vika', photos: [], pin: null, db_id: null, createdAt: new Date().toISOString() }])
+  }
+
+  // Vaihtaa havainnon "Vika"/"Läheltäpiti" -tyyppiä. Läheltäpiti-ilmoituksilla
+  // ei ole vikaluokkaa (CATS) — cat-kenttä asetetaan pelkäksi "Läheltäpiti"-
+  // vakioksi, jotta olemassa oleva ryhmittely/PDF-koodi (jotka ryhmittelevät
+  // o.cat:in mukaan) toimii ilman erillistä logiikkaa. Takaisin "Vika"-
+  // tyyppiin vaihdettaessa cat palautetaan listan ensimmäiseen vaihtoehtoon.
+  function setObsType(id, type) {
+    setObs(prev => prev.map(o => {
+      if (o.id !== id) return o
+      const updated = { ...o, type, cat: type === 'laheltapiti' ? 'Läheltäpiti' : CATS[0], muu: '' }
+      const { site: s, inspector: ins, rivi: r } = metaRef.current
+      saveObs(updated, s, ins, r)
+      return updated
+    }))
   }
 
   function newReport() {
@@ -362,7 +378,7 @@ export default function App() {
     if (quickAddId === o.id && o.pin) {
       const id = ++idCounter
       const clone = {
-        id, cat: o.cat, sev: o.sev, note: '', muu: o.muu, photos: [],
+        id, cat: o.cat, sev: o.sev, note: '', muu: o.muu, type: o.type || 'vika', photos: [],
         pin, db_id: null, createdAt: new Date().toISOString(),
         clonedFrom: o.id, // pikalisäyksen aikana luotu — käytetään extraPins-listaan MapView'ssa
       }
@@ -844,16 +860,43 @@ export default function App() {
 
               {/* Body */}
               <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {/* Category */}
+                {/* Havainnon tyyppi: Vika (oletus) tai Läheltäpiti */}
                 <div>
-                  <div style={labelStyle}>Vika</div>
-                  <select style={selectStyle} value={o.cat} onChange={e => updateObs(o.id, 'cat', e.target.value)}>
-                    {CATS.map(c => <option key={c}>{c}</option>)}
-                  </select>
-                  {o.cat === 'Muu asia' && (
-                    <input style={{ ...inputStyle, marginTop: 6 }} placeholder="Kirjoita havainto..." value={o.muu} onChange={e => updateObs(o.id, 'muu', e.target.value)} />
-                  )}
+                  <div style={labelStyle}>Havainnon tyyppi</div>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    {[['vika', 'Vika'], ['laheltapiti', 'Läheltäpiti']].map(([val, lbl]) => {
+                      const active = (o.type || 'vika') === val
+                      return (
+                        <button key={val} onClick={() => setObsType(o.id, val)} style={{
+                          flex: 1, padding: '8px 4px', borderRadius: 8, fontSize: 12, fontWeight: 700,
+                          border: `1px solid ${active ? '#1560c4' : '#d0d5e8'}`,
+                          background: active ? '#e4edfb' : '#eef0f7',
+                          color: active ? '#1560c4' : '#6670a0'
+                        }}>{lbl}</button>
+                      )
+                    })}
+                  </div>
                 </div>
+
+                {/* Category — vain vika-tyyppisillä havainnoilla */}
+                {(o.type || 'vika') === 'vika' ? (
+                  <div>
+                    <div style={labelStyle}>Vika</div>
+                    <select style={selectStyle} value={o.cat} onChange={e => updateObs(o.id, 'cat', e.target.value)}>
+                      {CATS.map(c => <option key={c}>{c}</option>)}
+                    </select>
+                    {o.cat === 'Muu asia' && (
+                      <input style={{ ...inputStyle, marginTop: 6 }} placeholder="Kirjoita havainto..." value={o.muu} onChange={e => updateObs(o.id, 'muu', e.target.value)} />
+                    )}
+                  </div>
+                ) : (
+                  <div>
+                    <div style={{ ...labelStyle, color: '#a06800' }}>⚠️ Läheltäpiti-ilmoitus</div>
+                    <div style={{ fontSize: 11.5, color: '#8a6a1f', marginBottom: 4 }}>
+                      Kuvaa tilanne "Lisätieto"-kenttään alla. Ei vaadi korjausseurantaa.
+                    </div>
+                  </div>
+                )}
 
                 {/* Severity */}
                 <div>
@@ -872,9 +915,9 @@ export default function App() {
 
                 {/* Note */}
                 <div>
-                  <div style={labelStyle}>Lisätieto</div>
+                  <div style={labelStyle}>{(o.type || 'vika') === 'laheltapiti' ? 'Kuvaa tilanne' : 'Lisätieto'}</div>
                   <textarea style={{ ...selectStyle, resize: 'none', minHeight: 56, lineHeight: 1.5 }}
-                    placeholder="Tarkempi kuvaus / lisätieto..."
+                    placeholder={(o.type || 'vika') === 'laheltapiti' ? 'Mitä tapahtui, missä, ketä koski...' : 'Tarkempi kuvaus / lisätieto...'}
                     value={o.note}
                     onChange={e => updateObs(o.id, 'note', e.target.value)}
                   />

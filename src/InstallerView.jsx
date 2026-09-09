@@ -119,7 +119,10 @@ export default function InstallerView() {
     setTasks(null)
   }
 
-  // Fetch open tasks assigned to this installer
+  // Fetch open tasks assigned to this installer. Läheltäpiti-ilmoitukset
+  // (type = 'laheltapiti') eivät kuulu tähän listaan — niillä ei ole
+  // korjausseurantaa (ei korjauskuvaa/"merkitse korjatuksi" -työnkulkua),
+  // vanhat rivit (type = null) tulkitaan aina "vika":ksi.
   async function loadTasks() {
     if (!session) return
     const { data } = await sb.from('observations')
@@ -127,7 +130,7 @@ export default function InstallerView() {
       .eq('assigned_installer_id', session.id)
       .eq('status', 'avoin')
       .order('created_at', { ascending: true })
-    setTasks(data || [])
+    setTasks((data || []).filter(o => (o.type || 'vika') !== 'laheltapiti'))
   }
   useEffect(() => { loadTasks() }, [session])
 

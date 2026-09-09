@@ -11,22 +11,96 @@ const sevColor = { Kriittinen: '#b02828', Huomio: '#a06800', Info: '#1a7a45' }
 const sevBg = { Kriittinen: '#fde2e2', Huomio: '#fdf0d5', Info: '#dcefe3' }
 const REFRESH_MS = 30000
 
+// Valvomon kirjautumisportti: Supabase Auth (sähköposti + salasana).
+// Tämä EI koske kenttäsovelluksen (asentaja/paalutus) omaa nimi+PIN-
+// kirjautumista eikä muuta observations/installers/teams-taulujen anon-
+// oikeuksia — se on vain käyttöliittymän portti Valvomon eteen. Käyttäjät
+// (työnjohtajat/valvojat) luodaan Supabasen Dashboard → Authentication →
+// Users -sivulta ("Add user", "Auto Confirm User" päälle).
+function AuthGate({ children }) {
+  const [session, setSession] = useState(undefined) // undefined = tarkistetaan, null = ei kirjautunut
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [err, setErr] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    sb.auth.getSession().then(({ data }) => setSession(data.session || null))
+    const { data: sub } = sb.auth.onAuthStateChange((_event, s) => setSession(s))
+    return () => sub.subscription.unsubscribe()
+  }, [])
+
+  async function login() {
+    setErr(''); setBusy(true)
+    const { error } = await sb.auth.signInWithPassword({ email: email.trim(), password })
+    setBusy(false)
+    if (error) setErr(error.message === 'Invalid login credentials' ? 'Väärä sähköposti tai salasana' : error.message)
+  }
+
+  if (session === undefined) {
+    return <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6670a0', fontFamily: 'system-ui, -apple-system, sans-serif' }}>Ladataan…</div>
+  }
+
+  if (!session) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f6f7fb', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+        <div style={{ background: '#fff', borderRadius: 14, boxShadow: '0 4px 24px rgba(20,30,80,0.10)', padding: 32, width: 340 }}>
+          <div style={{ textAlign: 'center', marginBottom: 18 }}>
+            <img src="/korpnex-icon.png" alt="Korpnex" style={{ height: 52, width: 'auto', display: 'block', margin: '0 auto 10px', borderRadius: 10 }} />
+            <div style={{ fontSize: 19, fontWeight: 800, color: '#1560c4', letterSpacing: 0.5 }}>KORPNEX <span style={{ opacity: 0.5, fontWeight: 500 }}>·</span> Valvomo</div>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <input
+              type="email" placeholder="Sähköposti" value={email} onChange={e => setEmail(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && login()}
+              style={{ padding: 11, borderRadius: 8, border: '1px solid #d0d5e8', fontSize: 14 }}
+            />
+            <input
+              type="password" placeholder="Salasana" value={password} onChange={e => setPassword(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && login()}
+              style={{ padding: 11, borderRadius: 8, border: '1px solid #d0d5e8', fontSize: 14 }}
+            />
+            {err && <div style={{ color: '#d63030', fontSize: 12.5, textAlign: 'center' }}>{err}</div>}
+            <button onClick={login} disabled={busy || !email || !password} style={{
+              padding: 12, background: busy ? '#9aa2c0' : '#1560c4', color: '#fff', border: 'none',
+              borderRadius: 8, fontWeight: 700, fontSize: 14, cursor: busy ? 'default' : 'pointer', marginTop: 4,
+            }}>
+              {busy ? 'Kirjaudutaan…' : 'Kirjaudu'}
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  return children(session)
+}
+
 export default function Dashboard() {
+  return <AuthGate>{session => <DashboardInner session={session} />}</AuthGate>
+}
+
+function DashboardInner({ session }) {
   const [obs, setObs] = useState([])
   const [installers, setInstallers] = useState([])
   const [teams, setTeams] = useState([])
+  const [contractors, setContractors] = useState([])
   const [loading, setLoading] = useState(true)
   const [lastRefresh, setLastRefresh] = useState(null)
   const [siteFilter, setSiteFilter] = useState('')
   const [teamFilter, setTeamFilter] = useState('')
   const [search, setSearch] = useState('')
-  const [tab, setTab] = useState('open') // 'open' | 'fixed' | 'hidden' | 'teams'
+  const [tab, setTab] = useState('open') // 'open' | 'fixed' | 'hidden' | 'nearmiss' | 'teams' | 'contractors' | 'piling'
   const [selected, setSelected] = useState(new Set())
   const [busy, setBusy] = useState(false)
   const [newTeamName, setNewTeamName] = useState('')
   const [newInstallerName, setNewInstallerName] = useState('')
   const [newInstallerPin, setNewInstallerPin] = useState('')
   const [lightboxSrc, setLightboxSrc] = useState(null) // korjauskuvan suurennettu näkymä
+
+  // --- Urakoitsijat-välilehden tila ---
+  const [newContractorName, setNewContractorName] = useState('')
+  const [selectedContractorId, setSelectedContractorId] = useState('')
 
   // --- Paalutus-välilehden tila ---
   const [pileOperators, setPileOperators] = useState([])
@@ -42,23 +116,26 @@ export default function Dashboard() {
   const [editPileKn, setEditPileKn] = useState('')
 
   const load = useCallback(async () => {
-    const [{ data: o, error: oErr }, { data: i, error: iErr }, { data: tm, error: tErr }, { data: po, error: poErr }, { data: prs, error: prsErr }] = await Promise.all([
+    const [{ data: o, error: oErr }, { data: i, error: iErr }, { data: tm, error: tErr }, { data: po, error: poErr }, { data: prs, error: prsErr }, { data: co, error: cErr }] = await Promise.all([
       sb.from('observations').select('*').order('created_at', { ascending: false }).limit(3000),
       sb.from('installers').select('*').order('name'),
       sb.from('teams').select('*').order('name'),
       sb.from('pile_operators').select('*').order('name'),
       sb.from('pile_rows_summary').select('*').order('area').order('row_number'),
+      sb.from('contractors').select('*').order('name'),
     ])
     if (oErr) console.error('Dashboard: observations fetch failed', oErr)
     if (iErr) console.error('Dashboard: installers fetch failed', iErr)
     if (tErr) console.error('Dashboard: teams fetch failed', tErr)
     if (poErr) console.error('Dashboard: pile_operators fetch failed', poErr)
     if (prsErr) console.error('Dashboard: pile_rows_summary fetch failed', prsErr)
+    if (cErr) console.error('Dashboard: contractors fetch failed', cErr)
     setObs(o || [])
     setInstallers(i || [])
     setTeams(tm || [])
     setPileOperators(po || [])
     setPileRowSummary(prs || [])
+    setContractors(co || [])
     setLoading(false)
     setLastRefresh(new Date())
   }, [])
@@ -75,6 +152,9 @@ export default function Dashboard() {
   const teamById = useMemo(() => {
     const m = new Map(); teams.forEach(t => m.set(t.id, t)); return m
   }, [teams])
+  const contractorById = useMemo(() => {
+    const m = new Map(); contractors.forEach(c => m.set(c.id, c)); return m
+  }, [contractors])
 
   // Ryhmittelyavain jokaiselle havainnolle: tiimi (jos asentaja kuuluu
   // tiimiin, tai havainto on osoitettu suoraan tiimille), muuten
@@ -87,6 +167,25 @@ export default function Dashboard() {
       return { key: 'inst:' + o.assigned_installer_id, team: null, installer: inst }
     }
     return { key: '__unassigned', team: null, installer: null }
+  }, [installerById, teamById])
+
+  // Urakoitsija-taso: tiimi tai asentaja "kuuluu" urakoitsijaan (contractor_id),
+  // ja havainto perii sen sen mukaan kenelle se on osoitettu. Jos havainto on
+  // osoitettu tiimille, tiimin oma urakoitsija ratkaisee; jos yksittäiselle
+  // asentajalle, käytetään ensin hänen tiiminsä urakoitsijaa (jos tiimillä on
+  // sellainen), sitten asentajan omaa urakoitsijaa.
+  const contractorIdOf = useCallback(o => {
+    if (o.assigned_team_id) return teamById.get(o.assigned_team_id)?.contractor_id || null
+    if (o.assigned_installer_id) {
+      const inst = installerById.get(o.assigned_installer_id)
+      if (!inst) return null
+      if (inst.team_id) {
+        const teamContractor = teamById.get(inst.team_id)?.contractor_id
+        if (teamContractor) return teamContractor
+      }
+      return inst.contractor_id || null
+    }
+    return null
   }, [installerById, teamById])
 
   const filtered = useMemo(() => {
@@ -105,9 +204,17 @@ export default function Dashboard() {
     })
   }, [obs, siteFilter, teamFilter, search, groupInfo])
 
-  const openObs = useMemo(() => filtered.filter(o => o.status !== 'korjattu' && !o.hidden_at), [filtered])
-  const fixedObs = useMemo(() => filtered.filter(o => o.status === 'korjattu' && !o.hidden_at), [filtered])
+  // Läheltäpiti-ilmoituksilla (type = 'laheltapiti') ei ole korjausseurantaa,
+  // niin ne pidetään erillään "Avoimet"/"Korjatut"-vikalistoista omassa
+  // välilehdessään — vanhat rivit (type = null) tulkitaan aina "vika":ksi.
+  const openObs = useMemo(() => filtered.filter(o => o.status !== 'korjattu' && !o.hidden_at && (o.type || 'vika') !== 'laheltapiti'), [filtered])
+  const fixedObs = useMemo(() => filtered.filter(o => o.status === 'korjattu' && !o.hidden_at && (o.type || 'vika') !== 'laheltapiti'), [filtered])
   const hiddenObs = useMemo(() => filtered.filter(o => !!o.hidden_at), [filtered])
+  const nearMissObs = useMemo(() => filtered.filter(o => (o.type || 'vika') === 'laheltapiti' && !o.hidden_at), [filtered])
+  const nearMissSorted = useMemo(
+    () => [...nearMissObs].sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0)),
+    [nearMissObs]
+  )
   const totalCritical = useMemo(() => openObs.filter(o => o.sev === 'Kriittinen').length, [openObs])
 
   const openByGroup = useMemo(() => {
@@ -187,6 +294,35 @@ export default function Dashboard() {
     if (error) { alert('Poisto epäonnistui: ' + error.message); return }
     load()
   }
+  // --- Urakoitsijat ---
+  async function createContractor() {
+    const name = newContractorName.trim()
+    if (!name) return
+    const { error } = await sb.from('contractors').insert([{ name }])
+    if (error) { alert('Urakoitsijan luonti epäonnistui: ' + error.message + '\n\nJos virhe mainitsee taulun puuttumisen, aja contractors_schema.sql Supabasen SQL Editorissa.'); return }
+    setNewContractorName('')
+    load()
+  }
+  async function deleteContractor(id) {
+    if (!window.confirm('Poistetaanko urakoitsija? Sille liitetyt tiimit/asentajat jäävät ilman urakoitsijaa, eivät poistu.')) return
+    if (selectedContractorId === id) setSelectedContractorId('')
+    const { error } = await sb.from('contractors').delete().eq('id', id)
+    if (error) { alert('Poisto epäonnistui: ' + error.message); return }
+    load()
+  }
+  async function setInstallerContractor(installerId, contractorId) {
+    const { data, error } = await sb.from('installers').update({ contractor_id: contractorId || null }).eq('id', installerId).select()
+    if (error) { alert('Tallennus epäonnistui: ' + error.message); return }
+    if (!data || data.length === 0) { alert('Tallennus ei muuttanut mitään — tarkista RLS-oikeudet.'); return }
+    load()
+  }
+  async function setTeamContractor(teamId, contractorId) {
+    const { data, error } = await sb.from('teams').update({ contractor_id: contractorId || null }).eq('id', teamId).select()
+    if (error) { alert('Tallennus epäonnistui: ' + error.message); return }
+    if (!data || data.length === 0) { alert('Tallennus ei muuttanut mitään — tarkista RLS-oikeudet.'); return }
+    load()
+  }
+
   async function setInstallerTeam(installerId, teamId) {
     const { data, error } = await sb.from('installers').update({ team_id: teamId || null }).eq('id', installerId).select()
     if (error) { alert('Tallennus epäonnistui: ' + error.message); return }
@@ -321,9 +457,15 @@ export default function Dashboard() {
             {loading ? 'Ladataan…' : `Päivitetty ${lastRefresh?.toLocaleTimeString('fi-FI')} · päivittyy automaattisesti`}
           </div>
         </div>
-        <button onClick={load} style={{ background: 'rgba(255,255,255,0.16)', border: 'none', color: '#fff', borderRadius: 9, padding: '10px 18px', fontSize: 13, fontWeight: 700, cursor: 'pointer', transition: 'background 0.15s' }}>
-          🔄 Päivitä nyt
-        </button>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <span style={{ color: 'rgba(255,255,255,0.75)', fontSize: 12.5 }}>{session?.user?.email}</span>
+          <button onClick={load} style={{ background: 'rgba(255,255,255,0.16)', border: 'none', color: '#fff', borderRadius: 9, padding: '10px 18px', fontSize: 13, fontWeight: 700, cursor: 'pointer', transition: 'background 0.15s' }}>
+            🔄 Päivitä nyt
+          </button>
+          <button onClick={() => sb.auth.signOut()} style={{ background: 'rgba(255,255,255,0.16)', border: 'none', color: '#fff', borderRadius: 9, padding: '10px 14px', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
+            Kirjaudu ulos
+          </button>
+        </div>
       </div>
 
       <div style={{ maxWidth: 1440, margin: '0 auto', padding: '26px 30px 70px' }}>
@@ -334,6 +476,8 @@ export default function Dashboard() {
           <SummaryCard label="Korjattu" value={fixedObs.length} color="#1a8a50" />
           <SummaryCard label="Asentajia" value={installers.length} color="#6670a0" />
           <SummaryCard label="Tiimejä" value={teams.length} color="#8a5fc9" />
+          <SummaryCard label="Läheltäpiti" value={nearMissObs.length} color="#a06800" />
+          <SummaryCard label="Urakoitsijoita" value={contractors.length} color="#1560c4" />
         </div>
 
         {/* Suodattimet */}
@@ -355,14 +499,16 @@ export default function Dashboard() {
           <div style={{ display: 'flex', gap: 3, background: '#e9ebf6', padding: 4, borderRadius: 10 }}>
             <TabButton active={tab === 'open'} onClick={() => { setTab('open'); clearSelection() }}>Avoimet ({openObs.length})</TabButton>
             <TabButton active={tab === 'fixed'} onClick={() => { setTab('fixed'); clearSelection() }}>Korjatut ({fixedObs.length})</TabButton>
+            <TabButton active={tab === 'nearmiss'} onClick={() => { setTab('nearmiss'); clearSelection() }}>Läheltäpiti ({nearMissObs.length})</TabButton>
             <TabButton active={tab === 'hidden'} onClick={() => { setTab('hidden'); clearSelection() }}>Piilotetut ({hiddenObs.length})</TabButton>
             <TabButton active={tab === 'teams'} onClick={() => { setTab('teams'); clearSelection() }}>Tiimit</TabButton>
+            <TabButton active={tab === 'contractors'} onClick={() => { setTab('contractors'); clearSelection() }}>Urakoitsijat</TabButton>
             <TabButton active={tab === 'piling'} onClick={() => { setTab('piling'); clearSelection() }}>Paalutus</TabButton>
           </div>
         </div>
 
         {/* Massatoimintopalkki */}
-        {selected.size > 0 && tab !== 'teams' && tab !== 'piling' && (
+        {selected.size > 0 && tab !== 'teams' && tab !== 'piling' && tab !== 'contractors' && (
           <div style={{ position: 'sticky', top: 12, zIndex: 10, background: '#fff', border: '1px solid #d0d5e8', borderRadius: 12, padding: '10px 16px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 12, boxShadow: '0 4px 16px rgba(20,30,80,0.10)' }}>
             <span style={{ fontSize: 13, fontWeight: 700, color: '#0d1a6e' }}>{selected.size} valittu</span>
             <div style={{ flex: 1 }} />
@@ -477,6 +623,42 @@ export default function Dashboard() {
           </div>
         )}
 
+        {tab === 'nearmiss' && (
+          <div style={cardStyle}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <thead>
+                <tr style={{ background: '#eef0f7', textAlign: 'left' }}>
+                  <th style={{ ...thStyle, width: 34 }}>
+                    <input type="checkbox" checked={nearMissSorted.length > 0 && nearMissSorted.every(o => selected.has(o.id))} onChange={() => toggleSelectGroup(nearMissSorted)} />
+                  </th>
+                  <th style={thStyle}>Kuvaus</th>
+                  <th style={thStyle}>Vakavuus</th>
+                  <th style={thStyle}>Työmaa / rivi</th>
+                  <th style={thStyle}>Urakoitsija</th>
+                  <th style={thStyle}>Ilmoittaja</th>
+                  <th style={thStyle}>Aika</th>
+                </tr>
+              </thead>
+              <tbody>
+                {nearMissSorted.map(o => (
+                  <tr key={o.id} style={{ borderBottom: '1px solid #f0f1f7', background: selected.has(o.id) ? '#f3f5ff' : 'transparent' }}>
+                    <td style={tdStyle}><input type="checkbox" checked={selected.has(o.id)} onChange={() => toggleSelect(o.id)} /></td>
+                    <td style={tdStyle}>{o.note || <span style={{ color: '#c3c8dc' }}>—</span>}</td>
+                    <td style={tdStyle}><span style={{ fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 20, background: sevBg[o.sev], color: sevColor[o.sev] }}>{o.sev}</span></td>
+                    <td style={tdStyle}>{o.site}{o.rivi ? ` · ${o.rivi}` : ''}</td>
+                    <td style={tdStyle}>{contractorById.get(contractorIdOf(o))?.name || '—'}</td>
+                    <td style={tdStyle}>{o.inspector || '—'}</td>
+                    <td style={tdStyle}>{fmtTime(o.created_at)}</td>
+                  </tr>
+                ))}
+                {nearMissSorted.length === 0 && (
+                  <tr><td colSpan={7} style={{ ...tdStyle, textAlign: 'center', color: '#9aa2c0', padding: 40 }}>Ei läheltäpiti-ilmoituksia</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+
         {tab === 'teams' && (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 16 }}>
             <div style={{ ...cardStyle, padding: 18 }}>
@@ -539,6 +721,130 @@ export default function Dashboard() {
                 />
                 <button onClick={addInstaller} style={{ background: '#1560c4', color: '#fff', border: 'none', borderRadius: 8, padding: '0 16px', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>+</button>
               </div>
+            </div>
+          </div>
+        )}
+
+        {tab === 'contractors' && (
+          <div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16, marginBottom: 20 }}>
+              <div style={{ ...cardStyle, padding: 18 }}>
+                <div style={{ fontWeight: 700, fontSize: 14, color: '#0d1a6e', marginBottom: 10 }}>+ Uusi urakoitsija</div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <input
+                    placeholder="Urakoitsijan nimi"
+                    value={newContractorName}
+                    onChange={e => setNewContractorName(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && createContractor()}
+                    style={{ ...selectStyle, flex: 1 }}
+                  />
+                  <button onClick={createContractor} style={{ background: '#1560c4', color: '#fff', border: 'none', borderRadius: 8, padding: '9px 16px', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>Luo</button>
+                </div>
+              </div>
+
+              {contractors.map(c => {
+                const openCount = openObs.filter(o => contractorIdOf(o) === c.id).length
+                const nearMissCount = nearMissObs.filter(o => contractorIdOf(o) === c.id).length
+                const active = selectedContractorId === c.id
+                return (
+                  <div key={c.id} style={{ ...cardStyle, border: active ? '2px solid #1560c4' : '1px solid transparent' }}>
+                    <div style={{ padding: '13px 16px', background: '#eaf3fb', borderBottom: '1px solid #e4e7f3', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontWeight: 700, fontSize: 14, color: '#0d1a6e' }}>🏢 {c.name}</span>
+                      <button onClick={() => deleteContractor(c.id)} style={{ background: 'none', border: 'none', color: '#b02828', fontSize: 12, cursor: 'pointer' }}>Poista</button>
+                    </div>
+                    <div style={{ padding: 14 }}>
+                      <div style={{ fontSize: 12, color: '#6670a0', marginBottom: 10 }}>
+                        {openCount} avoinna oleva{openCount === 1 ? '' : 'a'} vika · {nearMissCount} läheltäpiti
+                      </div>
+                      <button
+                        onClick={() => setSelectedContractorId(active ? '' : c.id)}
+                        style={{
+                          width: '100%', padding: 9, borderRadius: 8, border: 'none', fontSize: 12.5, fontWeight: 700, cursor: 'pointer',
+                          background: active ? '#1560c4' : '#eef0f7', color: active ? '#fff' : '#1560c4',
+                        }}
+                      >
+                        {active ? '✓ Näytetään data alla' : 'Näytä data'}
+                      </button>
+                    </div>
+                  </div>
+                )
+              })}
+              {contractors.length === 0 && (
+                <div style={{ ...cardStyle, padding: 18, color: '#9aa2c0', fontSize: 13 }}>Ei urakoitsijoita vielä — luo ensimmäinen yllä.</div>
+              )}
+            </div>
+
+            {/* Urakoitsijakohtainen data: valitun urakoitsijan avoimet+korjatut viat ja läheltäpiti-ilmoitukset */}
+            {selectedContractorId && (() => {
+              const c = contractorById.get(selectedContractorId)
+              const cOpen = openObs.filter(o => contractorIdOf(o) === selectedContractorId)
+              const cFixed = fixedObs.filter(o => contractorIdOf(o) === selectedContractorId)
+              const cNearMiss = nearMissSorted.filter(o => contractorIdOf(o) === selectedContractorId)
+              return (
+                <div style={{ ...cardStyle, padding: 20, marginBottom: 24 }}>
+                  <div style={{ fontWeight: 700, fontSize: 16, color: '#0d1a6e', marginBottom: 16 }}>🏢 {c?.name} — kaikki data</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 18 }}>
+                    <div>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: '#1560c4', textTransform: 'uppercase', marginBottom: 8 }}>Avoimet viat ({cOpen.length})</div>
+                      <div style={{ maxHeight: 320, overflowY: 'auto', border: '1px solid #eef0f7', borderRadius: 8 }}>
+                        {cOpen.map(o => <ObsRow key={o.id} o={o} fmtTime={fmtTime} selected={false} onToggle={() => {}} />)}
+                        {cOpen.length === 0 && <div style={{ padding: 16, fontSize: 12.5, color: '#9aa2c0' }}>Ei avoimia vikoja</div>}
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: '#1a8a50', textTransform: 'uppercase', marginBottom: 8 }}>Korjatut viat ({cFixed.length})</div>
+                      <div style={{ maxHeight: 320, overflowY: 'auto', border: '1px solid #eef0f7', borderRadius: 8 }}>
+                        {cFixed.map(o => <ObsRow key={o.id} o={o} fmtTime={fmtTime} selected={false} onToggle={() => {}} />)}
+                        {cFixed.length === 0 && <div style={{ padding: 16, fontSize: 12.5, color: '#9aa2c0' }}>Ei korjattuja vikoja</div>}
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: '#a06800', textTransform: 'uppercase', marginBottom: 8 }}>Läheltäpiti ({cNearMiss.length})</div>
+                      <div style={{ maxHeight: 320, overflowY: 'auto', border: '1px solid #eef0f7', borderRadius: 8 }}>
+                        {cNearMiss.map(o => <ObsRow key={o.id} o={o} fmtTime={fmtTime} selected={false} onToggle={() => {}} />)}
+                        {cNearMiss.length === 0 && <div style={{ padding: 16, fontSize: 12.5, color: '#9aa2c0' }}>Ei läheltäpiti-ilmoituksia</div>}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )
+            })()}
+
+            {/* Urakoitsija-liitosten hallinta: kaikki tiimit ja asentajat, valitse urakoitsija kummallekin */}
+            <div style={{ ...cardStyle, padding: 20 }}>
+              <div style={{ fontWeight: 700, fontSize: 15, color: '#0d1a6e', marginBottom: 14 }}>Tiimien ja asentajien urakoitsijat</div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: '#9aa2c0', marginBottom: 8, textTransform: 'uppercase' }}>Tiimit</div>
+              {teams.length === 0 && <div style={{ fontSize: 13, color: '#9aa2c0', marginBottom: 10 }}>Ei tiimejä vielä</div>}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '4px 24px', marginBottom: 18 }}>
+                {teams.map(t => (
+                  <div key={t.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '9px 0', borderBottom: '1px solid #f4f5fa', gap: 10 }}>
+                    <span style={{ fontSize: 14, flex: 1, minWidth: 0 }}>🧑‍🤝‍🧑 {t.name}</span>
+                    <select value={t.contractor_id || ''} onChange={e => setTeamContractor(t.id, e.target.value || null)} style={{ ...selectStyle, padding: '6px 10px', fontSize: 12.5 }}>
+                      <option value="">Ei urakoitsijaa</option>
+                      {contractors.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    </select>
+                  </div>
+                ))}
+              </div>
+
+              <div style={{ fontSize: 11, fontWeight: 700, color: '#9aa2c0', marginBottom: 8, textTransform: 'uppercase' }}>Asentajat</div>
+              {installers.length === 0 && <div style={{ fontSize: 13, color: '#9aa2c0', marginBottom: 10 }}>Ei asentajia vielä</div>}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '4px 24px' }}>
+                {installers.map(i => (
+                  <div key={i.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '9px 0', borderBottom: '1px solid #f4f5fa', gap: 10 }}>
+                    <span style={{ fontSize: 14, flex: 1, minWidth: 0 }}>👷 {i.name}{i.team_id ? ` (${teamById.get(i.team_id)?.name || 'tiimi'})` : ''}</span>
+                    <select value={i.contractor_id || ''} onChange={e => setInstallerContractor(i.id, e.target.value || null)} style={{ ...selectStyle, padding: '6px 10px', fontSize: 12.5 }}>
+                      <option value="">Ei urakoitsijaa</option>
+                      {contractors.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    </select>
+                  </div>
+                ))}
+              </div>
+              {teams.some(t => t.contractor_id) && (
+                <div style={{ fontSize: 11.5, color: '#9aa2c0', marginTop: 14 }}>
+                  Huom: jos asentaja kuuluu tiimiin JA tiimillä on urakoitsija, tiimin urakoitsija ratkaisee sen havainnot — asentajan oma urakoitsija-valinta vaikuttaa vain silloin kun havainto on osoitettu hänelle henkilökohtaisesti eikä hänen tiimilleen.
+                </div>
+              )}
             </div>
           </div>
         )}

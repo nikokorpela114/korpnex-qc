@@ -35,6 +35,7 @@ export const CAT_EN = {
   'Ristituki rauta tasaamatta': 'Cross brace bar not aligned',
   'Suojakansi puuttuu': 'Protective cover missing',
   'Muu asia': 'Other',
+  'Läheltäpiti': 'Near miss',
 }
 export const SEV_EN = { Kriittinen: 'Critical', Huomio: 'Attention', Info: 'Info' }
 
