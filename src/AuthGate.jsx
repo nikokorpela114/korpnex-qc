@@ -124,7 +124,11 @@ export default function AuthGate({ children, allowedRoles, title }) {
     setBusy(true)
     const cleanEmail = email.trim()
     const cleanCompany = companyName.trim()
-    const { data, error } = await sb.auth.signUp({ email: cleanEmail, password })
+    const { data, error } = await sb.auth.signUp({
+      email: cleanEmail,
+      password,
+      options: { emailRedirectTo: window.location.origin + window.location.pathname + window.location.search },
+    })
     if (error) {
       setBusy(false)
       setErr(error.message === 'User already registered' ? 'Tällä sähköpostilla on jo tili — kirjaudu sisään.' : error.message)
