@@ -27,6 +27,23 @@ import { sb } from './supabaseClient.js'
 
 const PENDING_COMPANY_KEY = 'korpnex_pending_company_name'
 
+// supabase-js:n functions.invoke() palauttaa non-2xx-vastauksille aina
+// yleisen "Edge Function returned a non-2xx status code" -viestin
+// error.message:ssä, vaikka funktio itse palauttaisi kuvaavan
+// { error: "..." } -JSON-bodyn — oikea syy pitää kaivaa error.context
+// (raaka Response-olio) -kentästä erikseen. Tämä funktio yrittää sitä,
+// ja palaa yleiseen viestiin jos body ei olekaan JSON.
+export async function describeFnError(error, data) {
+  if (data && data.error) return data.error
+  if (error?.context && typeof error.context.json === 'function') {
+    try {
+      const body = await error.context.clone().json()
+      if (body?.error) return body.error
+    } catch { /* body ei ollut JSON — käytetään yleistä viestiä */ }
+  }
+  return error?.message || 'Tuntematon virhe'
+}
+
 const ROLE_LABEL = { admin: 'Ylläpitäjä', asentaja: 'Asentaja', paaluttaja: 'Paaluttaja' }
 
 function Shell({ children }) {
@@ -155,7 +172,7 @@ export default function AuthGate({ children, allowedRoles, title }) {
       body: { company_name: nameOverride ?? companyName.trim() },
     })
     setBusy(false)
-    if (error || data?.error) { setErr((data && data.error) || error.message); return }
+    if (error || data?.error) { setErr(await describeFnError(error, data)); return }
     try { localStorage.removeItem(PENDING_COMPANY_KEY) } catch { /* ei väliä */ }
     await refreshProfile(session.user.id)
   }

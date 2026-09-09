@@ -4,7 +4,7 @@
 // Avataan osoitteesta /?valvomo (sama reititysperiaate kuin /?asentaja).
 import React, { useState, useEffect, useMemo, useCallback } from 'react'
 import { sb } from './supabaseClient.js'
-import AuthGate from './AuthGate.jsx'
+import AuthGate, { describeFnError } from './AuthGate.jsx'
 import { typeLabel, extraLabel, PILE_TYPES, EXTRA_ACTIONS, buildRowExportFiles, orderPilesAlongRow } from './PaalutusView.jsx'
 
 const sevColor = { Kriittinen: '#b02828', Huomio: '#a06800', Info: '#1a7a45' }
@@ -326,7 +326,7 @@ function DashboardInner({ session, profile, logout }) {
     setUsersLoading(true); setUserErr('')
     const { data, error } = await sb.functions.invoke('manage-company-users', { body: { action: 'list' } })
     setUsersLoading(false)
-    if (error || data?.error) { setUserErr(data?.error || error.message); return }
+    if (error || data?.error) { setUserErr(await describeFnError(error, data)); return }
     setCompanyUsers(data.users || [])
   }
   async function createUser() {
@@ -334,7 +334,7 @@ function DashboardInner({ session, profile, logout }) {
     if (!emailVal || pwVal.length < 6) { setUserErr('Anna sähköposti ja vähintään 6 merkin salasana.'); return }
     setUserErr('')
     const { data, error } = await sb.functions.invoke('manage-company-users', { body: { action: 'create', email: emailVal, password: pwVal, role: newUserRole } })
-    if (error || data?.error) { setUserErr(data?.error || error.message); return }
+    if (error || data?.error) { setUserErr(await describeFnError(error, data)); return }
     setNewUserEmail(''); setNewUserPassword('')
     loadUsers()
   }
@@ -342,7 +342,7 @@ function DashboardInner({ session, profile, logout }) {
     if (!window.confirm(`Poistetaanko käyttäjä ${u.email}? Hän ei pääse enää kirjautumaan.`)) return
     setUserErr('')
     const { data, error } = await sb.functions.invoke('manage-company-users', { body: { action: 'delete', user_id: u.id } })
-    if (error || data?.error) { setUserErr(data?.error || error.message); return }
+    if (error || data?.error) { setUserErr(await describeFnError(error, data)); return }
     loadUsers()
   }
 
