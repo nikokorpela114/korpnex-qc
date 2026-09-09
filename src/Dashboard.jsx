@@ -23,10 +23,26 @@ function AuthGate({ children }) {
   const [password, setPassword] = useState('')
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
+  // 'login' | 'forgot' (salasanan palautuslinkin pyyntö) | 'recovery' (palautuslinkistä
+  // palattiin tänne — Supabase on jo asettanut väliaikaisen istunnon, tässä
+  // tilassa käyttäjä asettaa uuden salasanan ennen kuin pääsee sisään)
+  const [mode, setMode] = useState('login')
+  const [forgotMsg, setForgotMsg] = useState('')
+  const [newPw, setNewPw] = useState('')
+  const [newPw2, setNewPw2] = useState('')
+  const [pwSavedMsg, setPwSavedMsg] = useState('')
 
   useEffect(() => {
     sb.auth.getSession().then(({ data }) => setSession(data.session || null))
-    const { data: sub } = sb.auth.onAuthStateChange((_event, s) => setSession(s))
+    // PASSWORD_RECOVERY: käyttäjä tuli tähän sivuun sähköpostin palautuslinkistä.
+    // Supabase-js on jo lukenut linkin mukana tulleen tokenin URL:sta ja
+    // asettanut väliaikaisen istunnon automaattisesti — ei näytetä Valvomoa
+    // vielä, vaan pyydetään ensin uusi salasana (updateUser tarvitsee tämän
+    // istunnon toimiakseen).
+    const { data: sub } = sb.auth.onAuthStateChange((event, s) => {
+      if (event === 'PASSWORD_RECOVERY') setMode('recovery')
+      setSession(s)
+    })
     return () => sub.subscription.unsubscribe()
   }, [])
 
@@ -37,8 +53,60 @@ function AuthGate({ children }) {
     if (error) setErr(error.message === 'Invalid login credentials' ? 'Väärä sähköposti tai salasana' : error.message)
   }
 
+  async function sendReset() {
+    setErr(''); setForgotMsg(''); setBusy(true)
+    const { error } = await sb.auth.resetPasswordForEmail(email.trim(), {
+      redirectTo: window.location.origin + '/?valvomo',
+    })
+    setBusy(false)
+    if (error) setErr(error.message)
+    else setForgotMsg('✓ Palautuslinkki lähetetty sähköpostiin, jos tili on olemassa.')
+  }
+
+  async function saveNewPassword() {
+    setErr('')
+    if (newPw.length < 6) { setErr('Salasanan pitää olla vähintään 6 merkkiä'); return }
+    if (newPw !== newPw2) { setErr('Salasanat eivät täsmää'); return }
+    setBusy(true)
+    const { error } = await sb.auth.updateUser({ password: newPw })
+    setBusy(false)
+    if (error) { setErr(error.message); return }
+    setPwSavedMsg('✓ Salasana vaihdettu')
+    setMode('login')
+  }
+
   if (session === undefined) {
     return <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6670a0', fontFamily: 'system-ui, -apple-system, sans-serif' }}>Ladataan…</div>
+  }
+
+  if (mode === 'recovery') {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f6f7fb', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+        <div style={{ background: '#fff', borderRadius: 14, boxShadow: '0 4px 24px rgba(20,30,80,0.10)', padding: 32, width: 340 }}>
+          <div style={{ textAlign: 'center', marginBottom: 18 }}>
+            <div style={{ fontSize: 17, fontWeight: 800, color: '#1560c4' }}>Aseta uusi salasana</div>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <input
+              type="password" placeholder="Uusi salasana" value={newPw} onChange={e => setNewPw(e.target.value)}
+              style={{ padding: 11, borderRadius: 8, border: '1px solid #d0d5e8', fontSize: 14 }}
+            />
+            <input
+              type="password" placeholder="Uusi salasana (uudelleen)" value={newPw2} onChange={e => setNewPw2(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && saveNewPassword()}
+              style={{ padding: 11, borderRadius: 8, border: '1px solid #d0d5e8', fontSize: 14 }}
+            />
+            {err && <div style={{ color: '#d63030', fontSize: 12.5, textAlign: 'center' }}>{err}</div>}
+            <button onClick={saveNewPassword} disabled={busy || !newPw || !newPw2} style={{
+              padding: 12, background: busy ? '#9aa2c0' : '#1560c4', color: '#fff', border: 'none',
+              borderRadius: 8, fontWeight: 700, fontSize: 14, cursor: busy ? 'default' : 'pointer', marginTop: 4,
+            }}>
+              {busy ? 'Tallennetaan…' : 'Tallenna uusi salasana'}
+            </button>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   if (!session) {
@@ -49,25 +117,60 @@ function AuthGate({ children }) {
             <img src="/korpnex-icon.png" alt="Korpnex" style={{ height: 52, width: 'auto', display: 'block', margin: '0 auto 10px', borderRadius: 10 }} />
             <div style={{ fontSize: 19, fontWeight: 800, color: '#1560c4', letterSpacing: 0.5 }}>KORPNEX <span style={{ opacity: 0.5, fontWeight: 500 }}>·</span> Valvomo</div>
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <input
-              type="email" placeholder="Sähköposti" value={email} onChange={e => setEmail(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && login()}
-              style={{ padding: 11, borderRadius: 8, border: '1px solid #d0d5e8', fontSize: 14 }}
-            />
-            <input
-              type="password" placeholder="Salasana" value={password} onChange={e => setPassword(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && login()}
-              style={{ padding: 11, borderRadius: 8, border: '1px solid #d0d5e8', fontSize: 14 }}
-            />
-            {err && <div style={{ color: '#d63030', fontSize: 12.5, textAlign: 'center' }}>{err}</div>}
-            <button onClick={login} disabled={busy || !email || !password} style={{
-              padding: 12, background: busy ? '#9aa2c0' : '#1560c4', color: '#fff', border: 'none',
-              borderRadius: 8, fontWeight: 700, fontSize: 14, cursor: busy ? 'default' : 'pointer', marginTop: 4,
-            }}>
-              {busy ? 'Kirjaudutaan…' : 'Kirjaudu'}
-            </button>
-          </div>
+
+          {mode === 'login' ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {pwSavedMsg && <div style={{ color: '#1a8a50', fontSize: 12.5, textAlign: 'center', fontWeight: 700 }}>{pwSavedMsg}</div>}
+              <input
+                type="email" placeholder="Sähköposti" value={email} onChange={e => setEmail(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && login()}
+                style={{ padding: 11, borderRadius: 8, border: '1px solid #d0d5e8', fontSize: 14 }}
+              />
+              <input
+                type="password" placeholder="Salasana" value={password} onChange={e => setPassword(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && login()}
+                style={{ padding: 11, borderRadius: 8, border: '1px solid #d0d5e8', fontSize: 14 }}
+              />
+              {err && <div style={{ color: '#d63030', fontSize: 12.5, textAlign: 'center' }}>{err}</div>}
+              <button onClick={login} disabled={busy || !email || !password} style={{
+                padding: 12, background: busy ? '#9aa2c0' : '#1560c4', color: '#fff', border: 'none',
+                borderRadius: 8, fontWeight: 700, fontSize: 14, cursor: busy ? 'default' : 'pointer', marginTop: 4,
+              }}>
+                {busy ? 'Kirjaudutaan…' : 'Kirjaudu'}
+              </button>
+              <button
+                onClick={() => { setMode('forgot'); setErr(''); setForgotMsg('') }}
+                style={{ background: 'none', border: 'none', color: '#6670a0', fontSize: 12.5, cursor: 'pointer', marginTop: 2 }}
+              >
+                Unohtuiko salasana?
+              </button>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div style={{ fontSize: 12.5, color: '#6670a0', marginBottom: 2 }}>
+                Anna sähköpostiosoitteesi — lähetämme siihen linkin, jolla voit asettaa uuden salasanan.
+              </div>
+              <input
+                type="email" placeholder="Sähköposti" value={email} onChange={e => setEmail(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && sendReset()}
+                style={{ padding: 11, borderRadius: 8, border: '1px solid #d0d5e8', fontSize: 14 }}
+              />
+              {err && <div style={{ color: '#d63030', fontSize: 12.5, textAlign: 'center' }}>{err}</div>}
+              {forgotMsg && <div style={{ color: '#1a8a50', fontSize: 12.5, textAlign: 'center', fontWeight: 700 }}>{forgotMsg}</div>}
+              <button onClick={sendReset} disabled={busy || !email} style={{
+                padding: 12, background: busy ? '#9aa2c0' : '#1560c4', color: '#fff', border: 'none',
+                borderRadius: 8, fontWeight: 700, fontSize: 14, cursor: busy ? 'default' : 'pointer', marginTop: 4,
+              }}>
+                {busy ? 'Lähetetään…' : 'Lähetä palautuslinkki'}
+              </button>
+              <button
+                onClick={() => { setMode('login'); setErr('') }}
+                style={{ background: 'none', border: 'none', color: '#6670a0', fontSize: 12.5, cursor: 'pointer', marginTop: 2 }}
+              >
+                ← Takaisin kirjautumiseen
+              </button>
+            </div>
+          )}
         </div>
       </div>
     )
@@ -101,6 +204,13 @@ function DashboardInner({ session }) {
   // --- Urakoitsijat-välilehden tila ---
   const [newContractorName, setNewContractorName] = useState('')
   const [selectedContractorId, setSelectedContractorId] = useState('')
+
+  // --- Käyttäjät-välilehden tila (Valvomon omat sähköposti+salasana-tunnukset) ---
+  const [valvomoUsers, setValvomoUsers] = useState([])
+  const [usersLoading, setUsersLoading] = useState(false)
+  const [userErr, setUserErr] = useState('')
+  const [newUserEmail, setNewUserEmail] = useState('')
+  const [newUserPassword, setNewUserPassword] = useState('')
 
   // --- Paalutus-välilehden tila ---
   const [pileOperators, setPileOperators] = useState([])
@@ -323,6 +433,34 @@ function DashboardInner({ session }) {
     load()
   }
 
+  // --- Valvomon käyttäjät (Supabase Auth) — hoidetaan manage-valvomo-users
+  // Edge Functionin kautta, koska käyttäjän luonti/poisto vaatii
+  // service_role-oikeudet, joita ei koskaan saa laittaa selaimeen. Funktio
+  // tarkistaa itse että kutsuja on jo kirjautunut Valvomon käyttäjä.
+  async function loadUsers() {
+    setUsersLoading(true); setUserErr('')
+    const { data, error } = await sb.functions.invoke('manage-valvomo-users', { body: { action: 'list' } })
+    setUsersLoading(false)
+    if (error || data?.error) { setUserErr(data?.error || error.message); return }
+    setValvomoUsers(data.users || [])
+  }
+  async function createUser() {
+    const emailVal = newUserEmail.trim(), pwVal = newUserPassword
+    if (!emailVal || pwVal.length < 6) { setUserErr('Anna sähköposti ja vähintään 6 merkin salasana.'); return }
+    setUserErr('')
+    const { data, error } = await sb.functions.invoke('manage-valvomo-users', { body: { action: 'create', email: emailVal, password: pwVal } })
+    if (error || data?.error) { setUserErr(data?.error || error.message); return }
+    setNewUserEmail(''); setNewUserPassword('')
+    loadUsers()
+  }
+  async function deleteUser(u) {
+    if (!window.confirm(`Poistetaanko käyttäjä ${u.email}? Hän ei pääse enää kirjautumaan Valvomoon.`)) return
+    setUserErr('')
+    const { data, error } = await sb.functions.invoke('manage-valvomo-users', { body: { action: 'delete', user_id: u.id } })
+    if (error || data?.error) { setUserErr(data?.error || error.message); return }
+    loadUsers()
+  }
+
   async function setInstallerTeam(installerId, teamId) {
     const { data, error } = await sb.from('installers').update({ team_id: teamId || null }).eq('id', installerId).select()
     if (error) { alert('Tallennus epäonnistui: ' + error.message); return }
@@ -503,12 +641,13 @@ function DashboardInner({ session }) {
             <TabButton active={tab === 'hidden'} onClick={() => { setTab('hidden'); clearSelection() }}>Piilotetut ({hiddenObs.length})</TabButton>
             <TabButton active={tab === 'teams'} onClick={() => { setTab('teams'); clearSelection() }}>Tiimit</TabButton>
             <TabButton active={tab === 'contractors'} onClick={() => { setTab('contractors'); clearSelection() }}>Urakoitsijat</TabButton>
+            <TabButton active={tab === 'users'} onClick={() => { setTab('users'); clearSelection(); loadUsers() }}>Käyttäjät</TabButton>
             <TabButton active={tab === 'piling'} onClick={() => { setTab('piling'); clearSelection() }}>Paalutus</TabButton>
           </div>
         </div>
 
         {/* Massatoimintopalkki */}
-        {selected.size > 0 && tab !== 'teams' && tab !== 'piling' && tab !== 'contractors' && (
+        {selected.size > 0 && tab !== 'teams' && tab !== 'piling' && tab !== 'contractors' && tab !== 'users' && (
           <div style={{ position: 'sticky', top: 12, zIndex: 10, background: '#fff', border: '1px solid #d0d5e8', borderRadius: 12, padding: '10px 16px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 12, boxShadow: '0 4px 16px rgba(20,30,80,0.10)' }}>
             <span style={{ fontSize: 13, fontWeight: 700, color: '#0d1a6e' }}>{selected.size} valittu</span>
             <div style={{ flex: 1 }} />
@@ -845,6 +984,66 @@ function DashboardInner({ session }) {
                   Huom: jos asentaja kuuluu tiimiin JA tiimillä on urakoitsija, tiimin urakoitsija ratkaisee sen havainnot — asentajan oma urakoitsija-valinta vaikuttaa vain silloin kun havainto on osoitettu hänelle henkilökohtaisesti eikä hänen tiimilleen.
                 </div>
               )}
+            </div>
+          </div>
+        )}
+
+        {tab === 'users' && (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 16 }}>
+            <div style={{ ...cardStyle, padding: 18 }}>
+              <div style={{ fontWeight: 700, fontSize: 14, color: '#0d1a6e', marginBottom: 10 }}>+ Uusi käyttäjä</div>
+              <div style={{ fontSize: 12, color: '#6670a0', marginBottom: 10 }}>
+                Luo tunnus toiselle työnjohtajalle/valvojalle — hän voi kirjautua Valvomoon näillä tiedoilla heti (ei vaadi sähköpostin vahvistusta).
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <input
+                  type="email" placeholder="Sähköposti"
+                  value={newUserEmail} onChange={e => setNewUserEmail(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && createUser()}
+                  style={selectStyle}
+                />
+                <input
+                  type="text" placeholder="Väliaikainen salasana (väh. 6 merkkiä)"
+                  value={newUserPassword} onChange={e => setNewUserPassword(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && createUser()}
+                  style={selectStyle}
+                />
+                {userErr && <div style={{ color: '#d63030', fontSize: 12.5 }}>{userErr}</div>}
+                <button onClick={createUser} style={{ background: '#1560c4', color: '#fff', border: 'none', borderRadius: 8, padding: '9px 16px', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
+                  Luo käyttäjä
+                </button>
+                <div style={{ fontSize: 11, color: '#9aa2c0' }}>
+                  Käyttäjä voi itse vaihtaa tämän salasanan kirjautumissivun "Unohtuiko salasana?" -linkistä.
+                </div>
+              </div>
+            </div>
+
+            <div style={{ ...cardStyle, padding: 20, gridColumn: '1 / -1' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+                <div style={{ fontWeight: 700, fontSize: 15, color: '#0d1a6e' }}>Valvomoon kirjautuvat käyttäjät</div>
+                <button onClick={loadUsers} style={{ background: '#eef0f7', border: 'none', color: '#1560c4', borderRadius: 8, padding: '6px 12px', fontSize: 12.5, fontWeight: 700, cursor: 'pointer' }}>
+                  🔄 Päivitä lista
+                </button>
+              </div>
+              {usersLoading && <div style={{ fontSize: 13, color: '#9aa2c0' }}>Ladataan…</div>}
+              {!usersLoading && valvomoUsers.length === 0 && (
+                <div style={{ fontSize: 13, color: '#9aa2c0' }}>
+                  Ei käyttäjiä listattavissa. Jos tämä on ensimmäinen kerta, varmista että manage-valvomo-users-funktio on deployattu Supabaseen.
+                </div>
+              )}
+              {valvomoUsers.map(u => (
+                <div key={u.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '1px solid #f4f5fa', gap: 10 }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 14, fontWeight: 600 }}>{u.email}{u.id === session?.user?.id ? ' (sinä)' : ''}</div>
+                    <div style={{ fontSize: 11, color: '#9aa2c0' }}>
+                      Viimeksi kirjautunut: {u.last_sign_in_at ? fmtTime(u.last_sign_in_at) : 'ei koskaan'}
+                    </div>
+                  </div>
+                  {u.id !== session?.user?.id && (
+                    <button onClick={() => deleteUser(u)} title="Poista käyttäjä" style={{ background: 'none', border: 'none', color: '#b02828', fontSize: 15, cursor: 'pointer', padding: '2px 4px' }}>🗑️</button>
+                  )}
+                </div>
+              ))}
             </div>
           </div>
         )}
