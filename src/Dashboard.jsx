@@ -456,11 +456,14 @@ function DashboardInner({ session, profile, logout }) {
 
   return (
     <div style={{ minHeight: '100vh', background: '#f6f7fb', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
-      <div style={{ background: 'linear-gradient(135deg, #1560c4, #0e8fe0)', padding: '20px 30px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, boxShadow: '0 2px 12px rgba(21,96,196,0.18)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <img src="/korpnex-icon.png" alt="Korpnex" style={{ height: 36, width: 'auto', display: 'block' }} />
+      <div style={{ background: '#070b17', padding: '20px 30px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <img src="/korpnex-icon.png" alt="Korpnex" style={{ height: 32, width: 'auto', display: 'block' }} />
           <div>
-          <div style={{ color: '#fff', fontWeight: 800, fontSize: 21, letterSpacing: 0.2 }}>KORPNEX <span style={{ opacity: 0.55, fontWeight: 500 }}>·</span> Valvomo</div>
+          <div style={{ display: 'flex', alignItems: 'center' }}>
+            <span style={{ fontSize: 19, fontWeight: 800, color: '#fff', letterSpacing: 1 }}>KORPNEX</span>
+            <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', fontWeight: 500, marginLeft: 4 }}>· Valvomo</span>
+          </div>
           <div style={{ color: 'rgba(255,255,255,0.92)', fontSize: 13, marginTop: 3, display: 'flex', alignItems: 'center', gap: 6 }}>
             {editingCompanyName ? (
               <>

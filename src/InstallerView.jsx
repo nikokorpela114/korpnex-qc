@@ -55,6 +55,8 @@ function InstallerApp({ session, profile, logout }) {
   const [nmNote, setNmNote] = useState('')
   const [nmBusy, setNmBusy] = useState(false)
   const [nmMsg, setNmMsg] = useState('')
+  const [nmPhoto, setNmPhoto] = useState(null) // dataUrl tai null — valinnainen
+  const [nmPhotoBusy, setNmPhotoBusy] = useState(false)
 
   const t = key => {
     const dict = {
@@ -85,6 +87,10 @@ function InstallerApp({ session, profile, logout }) {
       nmNeedNote: { fi: 'Kuvaa tilanne ennen lähettämistä', en: 'Describe the situation before sending' },
       nmNeedSite: { fi: 'Valitse työmaa', en: 'Select a site' },
       nmError: { fi: 'Virhe', en: 'Error' },
+      nmPhotoLabel: { fi: 'Kuva (valinnainen)', en: 'Photo (optional)' },
+      nmAddPhoto: { fi: '📷 Ota kuva', en: '📷 Take photo' },
+      nmRetakePhoto: { fi: '📷 Ota uusi kuva', en: '📷 Retake photo' },
+      nmPhotoCompressing: { fi: 'Käsitellään kuvaa…', en: 'Processing photo…' },
     }
     return dict[key]?.[lang] ?? key
   }
@@ -246,6 +252,14 @@ function InstallerApp({ session, profile, logout }) {
     if (sites.length > 0) setNmSiteId(sites[0].id)
   }, [siteId, sites, nmSiteId])
 
+  async function addNearMissPhoto(file) {
+    if (!file) return
+    setNmPhotoBusy(true)
+    const src = await compressImage(file)
+    setNmPhotoBusy(false)
+    if (src) setNmPhoto(src)
+  }
+
   async function submitNearMiss() {
     if (!nmNote.trim()) { setNmMsg(t('nmNeedNote')); return }
     if (!nmSiteId) { setNmMsg(t('nmNeedSite')); return }
@@ -253,14 +267,14 @@ function InstallerApp({ session, profile, logout }) {
     const siteLabel = sites.find(s => s.id === nmSiteId)?.label || ''
     const { error } = await sb.from('observations').insert([{
       cat: 'Läheltäpiti', sev: nmSev, note: nmNote.trim(), muu: '',
-      type: 'laheltapiti', pin_x: null, pin_y: null,
+      type: 'laheltapiti', pin_x: null, pin_y: null, photo: nmPhoto,
       site: siteLabel, inspector: installer?.name || session.user.email, rivi: null,
       status: 'avoin', assigned_installer_id: null, assigned_team_id: null, report_batch: null,
       company_id: profile.company_id, created_at: new Date().toISOString(),
     }])
     setNmBusy(false)
     if (error) { setNmMsg(t('nmError') + ': ' + error.message); return }
-    setNmNote('')
+    setNmNote(''); setNmPhoto(null)
     setNmMsg(t('nmSent'))
     setTimeout(() => { setNmOpen(false); setNmMsg('') }, 1500)
   }
@@ -340,19 +354,20 @@ function InstallerApp({ session, profile, logout }) {
   // --- Task list ---
   return (
     <div style={{ maxWidth: 480, margin: '0 auto', minHeight: '100vh', background: '#f4f6fb' }}>
-      <div style={{ background: '#1560c4', padding: '16px 16px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <img src="/korpnex-icon.png" alt="Korpnex" style={{ height: 32, width: 'auto', display: 'block' }} />
-          <div>
-            <div style={{ color: '#fff', fontWeight: 800, fontSize: 17 }}>{installer.name}</div>
-            <div style={{ color: 'rgba(255,255,255,0.7)', fontSize: 12 }}>{t('title')}</div>
+      <div style={{ background: '#070b17', padding: '16px 16px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <img src="/korpnex-icon.png" alt="Korpnex" style={{ height: 32, width: 'auto', display: 'block' }} />
+            <span style={{ fontSize: 19, fontWeight: 800, color: '#fff', letterSpacing: 1 }}>KORPNEX</span>
+            <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', fontWeight: 500, marginLeft: 2 }}>· {t('title')}</span>
           </div>
+          <div style={{ color: 'rgba(255,255,255,0.6)', fontSize: 12, marginLeft: 40 }}>{installer.name}</div>
         </div>
         <div style={{ display: 'flex', gap: 6 }}>
-          <button onClick={() => setLang(lang === 'fi' ? 'en' : 'fi')} style={{ background: 'rgba(255,255,255,0.15)', border: 'none', color: '#fff', borderRadius: 6, padding: '5px 9px', fontSize: 12, fontWeight: 700 }}>
+          <button onClick={() => setLang(lang === 'fi' ? 'en' : 'fi')} style={{ background: 'rgba(255,255,255,0.12)', border: 'none', color: 'rgba(255,255,255,0.85)', borderRadius: 6, padding: '5px 9px', fontSize: 12, fontWeight: 700 }}>
             {lang === 'fi' ? 'EN' : 'FI'}
           </button>
-          <button onClick={logout} style={{ background: 'rgba(255,255,255,0.15)', border: 'none', color: '#fff', borderRadius: 6, padding: '5px 9px', fontSize: 12 }}>
+          <button onClick={logout} style={{ background: 'rgba(255,255,255,0.12)', border: 'none', color: 'rgba(255,255,255,0.85)', borderRadius: 6, padding: '5px 9px', fontSize: 12 }}>
             {t('logout')}
           </button>
         </div>
@@ -401,6 +416,20 @@ function InstallerApp({ session, profile, logout }) {
                 placeholder={t('nmNotePlaceholder')}
                 style={{ width: '100%', padding: 9, borderRadius: 8, border: '1px solid #d0d5e8', fontSize: 13.5, resize: 'none', minHeight: 64, lineHeight: 1.5, boxSizing: 'border-box' }}
               />
+            </div>
+
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: '#6670a0', marginBottom: 4 }}>{t('nmPhotoLabel')}</div>
+              {nmPhoto && (
+                <div style={{ position: 'relative', width: 90, marginBottom: 6 }}>
+                  <img src={nmPhoto} alt="" style={{ width: 90, height: 90, objectFit: 'cover', borderRadius: 8, border: '1px solid #d0d5e8', display: 'block' }} />
+                  <button onClick={() => setNmPhoto(null)} style={{ position: 'absolute', top: -6, right: -6, background: 'rgba(0,0,0,0.6)', border: 'none', borderRadius: '50%', width: 22, height: 22, color: '#fff', fontSize: 14 }}>×</button>
+                </div>
+              )}
+              <label style={{ display: 'inline-block', padding: '8px 14px', background: '#eef0f7', border: '1px solid #d0d5e8', borderRadius: 8, fontSize: 12.5, color: '#1560c4', fontWeight: 600, cursor: 'pointer' }}>
+                {nmPhotoBusy ? t('nmPhotoCompressing') : (nmPhoto ? t('nmRetakePhoto') : t('nmAddPhoto'))}
+                <input type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={e => addNearMissPhoto(e.target.files?.[0])} />
+              </label>
             </div>
 
             {nmMsg && <div style={{ fontSize: 12.5, color: nmMsg === t('nmSent') ? '#1a7a45' : '#b02828', fontWeight: 600 }}>{nmMsg}</div>}
