@@ -37,6 +37,7 @@ function InstallerApp({ session, profile, logout }) {
 
   const [tasks, setTasks] = useState(null) // null = ladataan
   const [siteId, setSiteId] = useState(null)
+  const [diarySiteId, setDiarySiteId] = useState('') // Päiväkirjan valittu työmaa — oma valinta, ei sidottu tehtävälistan siteId:hen
   const [mapData, setMapData] = useState(null)
   const [gpsCoords, setGpsCoords] = useState(null)
   const [pushMsg, setPushMsg] = useState('')
@@ -254,6 +255,13 @@ function InstallerApp({ session, profile, logout }) {
     if (sites.length > 0) setNmSiteId(sites[0].id)
   }, [siteId, sites, nmSiteId])
 
+  // Oletustyömaa Päiväkirjalle: sama logiikka kuin läheltäpiti-lomakkeella.
+  useEffect(() => {
+    if (diarySiteId) return
+    if (siteId) { setDiarySiteId(siteId); return }
+    if (sites.length > 0) setDiarySiteId(sites[0].id)
+  }, [siteId, sites, diarySiteId])
+
   async function addNearMissPhoto(file) {
     if (!file) return
     setNmPhotoBusy(true)
@@ -390,7 +398,22 @@ function InstallerApp({ session, profile, logout }) {
       </div>
 
       {mainTab === 'paivakirja' ? (
-        <Diary session={session} profile={profile} />
+        <>
+          {/* Työmaa-valitsin Päiväkirjalle — piilossa kun yrityksellä on
+              vain yksi työmaa, näkyy pudotusvalikkona kun niitä on useampi. */}
+          <div style={{ padding: '10px 12px', background: '#fff', borderBottom: '1px solid #d0d5e8' }}>
+            {sites.length > 1 ? (
+              <select value={diarySiteId} onChange={e => setDiarySiteId(e.target.value)} style={{ width: '100%', padding: 9, borderRadius: 8, border: '1px solid #d0d5e8', fontSize: 13.5, background: '#fff' }}>
+                {sites.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
+              </select>
+            ) : (
+              <div style={{ fontSize: 13, color: '#0d1a6e', fontWeight: 700 }}>
+                🏗 {sites[0]?.label || 'Ei työmaita — luo yksi Valvomon Työmaat-välilehdellä'}
+              </div>
+            )}
+          </div>
+          <Diary session={session} profile={profile} siteId={diarySiteId} siteLabel={sites.find(s => s.id === diarySiteId)?.label || ''} />
+        </>
       ) : (
       <>
       <div style={{ padding: 12 }}>

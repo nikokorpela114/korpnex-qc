@@ -792,6 +792,31 @@ function InspectorApp({ session, profile, logout }) {
         </div>
       </div>
 
+      {/* Työmaa-valitsin: yhteinen sekä Vikalistalle että Päiväkirjalle.
+          Kun yrityksellä on vain yksi työmaa, valikkoa ei näytetä ollenkaan
+          — käyttäjä on suoraan sillä, ei turhaa valintaa. Valikko ilmestyy
+          vain jos työmaita on useampi. */}
+      <div style={{ padding: '10px 16px', background: '#fff', borderBottom: '1px solid #d0d5e8' }}>
+        {sites.length > 1 ? (
+          <select
+            style={selectStyle}
+            value={currentSiteId}
+            onChange={e => {
+              const id = e.target.value
+              setCurrentSiteId(id)
+              const found = sites.find(s => s.id === id)
+              setSite(found ? found.label : '')
+            }}
+          >
+            {sites.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
+          </select>
+        ) : (
+          <div style={{ fontSize: 13, color: '#0d1a6e', fontWeight: 700 }}>
+            🏗 {site || 'Ei työmaita — luo yksi Valvomon Työmaat-välilehdellä'}
+          </div>
+        )}
+      </div>
+
       {/* Tab switcher: Vikalista / Päiväkirja */}
       <div style={{ display: 'flex', gap: 6, padding: '8px 16px', background: '#eef0f2' }}>
         {[['vika', 'Vikalista'], ['paivakirja', '📔 Päiväkirja']].map(([val, lbl]) => {
@@ -807,27 +832,15 @@ function InspectorApp({ session, profile, logout }) {
       </div>
 
       {mainTab === 'paivakirja' ? (
-        <Diary session={session} profile={profile} />
+        <Diary session={session} profile={profile} siteId={currentSiteId} siteLabel={site} />
       ) : (
       <>
       {/* Scroll area */}
       <div style={{ flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch', paddingBottom: 90 }}>
 
-        {/* Meta */}
+        {/* Meta — työmaa valitaan nyt yhteisestä valitsimesta yllä (tab-
+            switcherin päällä), ei enää tässä erikseen. */}
         <div style={{ padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 8, background: '#fff', borderBottom: '1px solid #d0d5e8' }}>
-          <select
-            style={selectStyle}
-            value={currentSiteId}
-            onChange={e => {
-              const id = e.target.value
-              setCurrentSiteId(id)
-              const found = sites.find(s => s.id === id)
-              setSite(found ? found.label : '')
-            }}
-          >
-            {sites.length === 0 && <option value="">Ei työmaita — luo yksi Valvomon Työmaat-välilehdellä</option>}
-            {sites.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
-          </select>
           <input style={inputStyle} placeholder="Tarkastaja" value={inspector} onChange={e => setInspector(e.target.value)} />
           <input style={inputStyle} placeholder="Rivi / alue (esim. A7-45)" value={rivi} onChange={e => setRivi(e.target.value)} />
           <button onClick={newReport} style={{ alignSelf: 'flex-end', background: 'none', border: 'none', fontSize: 11, color: '#6670a0', padding: '2px 0' }}>

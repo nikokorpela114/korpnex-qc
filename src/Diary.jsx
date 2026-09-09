@@ -1,23 +1,32 @@
-// src/Diary.jsx — Päiväkirja: rakennustyömaan etenemisen dokumentointi
-// (projekti -> työvaiheittain ryhmitellyt kuva+teksti-merkinnät -> PDF-
-// raportti). Sovitettu erillisestä Rakennuspäiväkirja-sovelluksesta
-// (ProjectList.jsx + ProjectDetail.jsx) tämän moniyritys-QC-sovelluksen
-// sisälle omaksi välilehdekseen — sekä Tarkastaja- (App.jsx) että Asentaja-
-// näkymään (InstallerView.jsx).
+// src/Diary.jsx — Päiväkirja: valitun työmaan etenemisen dokumentointi
+// (työvaiheittain ryhmitellyt kuva+teksti-merkinnät -> PDF-raportti).
 //
-// Erot alkuperäiseen erilliseen sovellukseen:
-//  - Data on yrityskohtaista (company_id), ei henkilökohtaista (user_id) —
-//    kaikki yrityksen jäsenet näkevät samat projektit ja merkinnät.
-//  - Projektien luonti/nimeäminen/arkistointi ja PDF-vienti on rajattu
-//    admin-roolille (canManage) — asentaja voi vain lisätä/muokata/poistaa
-//    OMIA merkintöjään (tai jos hän on admin, kaikkia).
-//  - Tyylitys inline style -objekteina (ei erillistä CSS-template-stringiä),
-//    samaa käytäntöä kuin App.jsx/InstallerView.jsx/Dashboard.jsx, ja
-//    värimaailma yhtenäistetty muun sovelluksen navy+sininen-brändiin
-//    (#070b17 / #1560c4), ei alkuperäisen erillisen sovelluksen omaa
-//    sinistä (#17275c).
-//  - Kuvat: bucket "diary-photos" (yksityinen), polku
-//    "{company_id}/{project_id}/{entry_id}.jpg" — ks. paivakirja_schema.sql.
+// HUOM: "projekti" ja "työmaa" ovat tarkoituksella SAMA asia — päiväkirjalla
+// ei ole omaa, työmaista erillistä projektilistaa/-luontia. Käyttäjä valitsee
+// työmaan yhteisestä valitsimesta (App.jsx/InstallerView.jsx, näkyy tab-
+// switcherin yhteydessä — piilossa kun yrityksellä on vain yksi työmaa), ja
+// Diary näyttää/tallentaa suoraan SEN työmaan merkinnät. Tämä komponentti saa
+// työmaan id:n ja nimen propseina (siteId, siteLabel) — ei enää valitse
+// mitään itse.
+//
+// Sovitettu alun perin erillisestä Rakennuspäiväkirja-sovelluksesta
+// (ProjectDetail.jsx) tämän moniyritys-QC-sovelluksen sisälle. Alkuperäisessä
+// versiossa oli myös ProjectList-näkymä (admin luo/nimeää/arkistoi
+// "projekteja" käsin) — se on poistettu kokonaan, koska työmaat hallitaan
+// jo Valvomon Työmaat-välilehdellä, eikä samaa asiaa haluttu kahteen kertaan.
+//
+// Oikeudet: kaikki yrityksen jäsenet (myös asentaja) näkevät työmaan
+// merkinnät ja voivat lisätä uusia (myös asentaja dokumentoi omaa työtään).
+// Yksittäisen merkinnän muokkaus/poisto onnistuu sen tekijältä itseltään tai
+// adminilta. PDF-vienti on rajattu adminille (Valvomo-tili).
+//
+// Tyylitys inline style -objekteina (ei erillistä CSS-template-stringiä),
+// samaa käytäntöä kuin App.jsx/InstallerView.jsx/Dashboard.jsx, ja
+// värimaailma yhtenäistetty muun sovelluksen navy+sininen-brändiin
+// (#070b17 / #1560c4).
+//
+// Kuvat: bucket "diary-photos" (yksityinen), polku
+// "{company_id}/{site_id}/{entry_id}.jpg" — ks. paivakirja_schema.sql.
 import React, { useState, useEffect, useCallback } from 'react'
 import { sb } from './supabaseClient.js'
 import { PHASES, OTHER_PHASE, findPhase, groupEntriesByPhase } from './phases.js'
@@ -60,12 +69,11 @@ function compressForUpload(file, maxDim = 1600, quality = 0.75) {
   })
 }
 
-export default function Diary({ session, profile }) {
+export default function Diary({ session, profile, siteId, siteLabel }) {
   const companyId = profile.company_id
   const canManage = profile.role === 'admin'
   const myName = profile.name || session.user.email
   const [companyName, setCompanyName] = useState('')
-  const [project, setProject] = useState(null) // valittu projekti; null = lista
 
   useEffect(() => {
     sb.from('companies').select('name').eq('id', companyId).maybeSingle().then(({ data }) => {
@@ -73,153 +81,33 @@ export default function Diary({ session, profile }) {
     })
   }, [companyId])
 
-  if (project) {
+  if (!siteId) {
     return (
-      <DiaryProjectDetail
-        project={project}
-        session={session}
-        canManage={canManage}
-        myName={myName}
-        companyId={companyId}
-        companyName={companyName}
-        onBack={() => setProject(null)}
-      />
+      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 32, background: '#f4f6fb' }}>
+        <div style={{ textAlign: 'center', color: '#6670a0', fontSize: 13.5, lineHeight: 1.6 }}>
+          Ei työmaita — luo yksi Valvomon Työmaat-välilehdellä, jotta Päiväkirja voidaan avata sille.
+        </div>
+      </div>
     )
   }
-  return <DiaryProjectList companyId={companyId} canManage={canManage} onOpenProject={setProject} />
-}
-
-// ---------------------------------------------------------------------
-// Projektilista
-// ---------------------------------------------------------------------
-function DiaryProjectList({ companyId, canManage, onOpenProject }) {
-  const [projects, setProjects] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [showArchived, setShowArchived] = useState(false)
-  const [addingNew, setAddingNew] = useState(false)
-  const [newName, setNewName] = useState('')
-  const [editingId, setEditingId] = useState(null)
-  const [editName, setEditName] = useState('')
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    const { data, error } = await sb.from('diary_projects').select('*').order('created_at', { ascending: false })
-    if (!error) setProjects(data || [])
-    else console.error('diary_projects load failed:', error)
-    setLoading(false)
-  }, [])
-  useEffect(() => { load() }, [load])
-
-  async function addProject() {
-    const name = newName.trim()
-    if (!name) return
-    const { data, error } = await sb.from('diary_projects').insert([{ name, company_id: companyId }]).select()
-    if (!error && data?.[0]) {
-      setProjects(prev => [data[0], ...prev])
-      setAddingNew(false); setNewName('')
-      onOpenProject(data[0])
-    } else {
-      console.error('addProject failed:', error)
-      alert('Projektin luonti epäonnistui — tarkista yhteys ja yritä uudelleen.')
-    }
-  }
-
-  async function renameProject(p) {
-    const name = editName.trim()
-    if (!name || name === p.name) { setEditingId(null); return }
-    const { error } = await sb.from('diary_projects').update({ name }).eq('id', p.id)
-    if (!error) setProjects(prev => prev.map(x => x.id === p.id ? { ...x, name } : x))
-    else console.error('renameProject failed:', error)
-    setEditingId(null)
-  }
-
-  async function toggleArchive(p) {
-    const next = !p.archived
-    if (next && !window.confirm(`Merkitäänkö projekti "${p.name}" valmiiksi?\n\nSe siirtyy "Valmiit"-listaan, mutta kaikki kuvat ja tiedot säilyvät — voit palauttaa sen takaisin milloin vain.`)) return
-    const { error } = await sb.from('diary_projects').update({ archived: next }).eq('id', p.id)
-    if (!error) setProjects(prev => prev.map(x => x.id === p.id ? { ...x, archived: next } : x))
-    else console.error('toggleArchive failed:', error)
-  }
-
-  const active = projects.filter(p => !p.archived)
-  const archived = projects.filter(p => p.archived)
-  const list = showArchived ? archived : active
 
   return (
-    <div style={{ flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch', padding: '12px 16px 90px', background: '#f4f6fb' }}>
-      <div style={{ display: 'flex', gap: 6, background: '#fff', border: '1px solid #d0d5e8', borderRadius: 10, padding: 4, marginBottom: 14 }}>
-        {[['active', `Aktiiviset (${active.length})`], ['archived', `Valmiit (${archived.length})`]].map(([val, lbl]) => {
-          const isArchivedTab = val === 'archived'
-          const isActiveTab = showArchived === isArchivedTab
-          return (
-            <button key={val} onClick={() => setShowArchived(isArchivedTab)} style={{
-              flex: 1, padding: '8px 4px', border: 'none', borderRadius: 8, fontSize: 12.5, fontWeight: 700,
-              background: isActiveTab ? '#070b17' : 'none', color: isActiveTab ? '#fff' : '#6670a0'
-            }}>{lbl}</button>
-          )
-        })}
-      </div>
-
-      {loading && <div style={{ textAlign: 'center', padding: '40px 16px', color: '#6670a0', fontSize: 13.5 }}>Ladataan…</div>}
-      {!loading && list.length === 0 && (
-        <div style={{ textAlign: 'center', padding: '40px 16px', color: '#6670a0', fontSize: 13.5, lineHeight: 1.6 }}>
-          {showArchived ? 'Ei valmiita projekteja.' : (canManage ? 'Ei vielä projekteja. Luo ensimmäinen alta ↓' : 'Ei vielä projekteja.')}
-        </div>
-      )}
-
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {list.map(p => (
-          <div key={p.id} style={{ background: '#fff', border: '1px solid #d0d5e8', borderRadius: 12, display: 'flex', alignItems: 'stretch' }}>
-            {editingId === p.id ? (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, width: '100%', padding: 8 }}>
-                <input autoFocus value={editName} onChange={e => setEditName(e.target.value)}
-                  onKeyDown={e => { if (e.key === 'Enter') renameProject(p); if (e.key === 'Escape') setEditingId(null) }}
-                  style={{ flex: 1, background: '#fff', border: '1px solid #d0d5e8', borderRadius: 8, padding: '8px 10px', fontSize: 14 }} />
-                <button onClick={() => renameProject(p)} style={{ background: '#eef0f2', border: '1px solid #d0d5e8', borderRadius: 8, padding: '8px 10px', fontSize: 13 }}>✓</button>
-                <button onClick={() => setEditingId(null)} style={{ background: '#eef0f2', border: '1px solid #d0d5e8', borderRadius: 8, padding: '8px 10px', fontSize: 13 }}>✕</button>
-              </div>
-            ) : (
-              <>
-                <button onClick={() => onOpenProject(p)} style={{ flex: 1, textAlign: 'left', background: 'none', border: 'none', padding: 14 }}>
-                  <div style={{ fontSize: 14.5, fontWeight: 700, color: '#0d1a6e' }}>{p.name}</div>
-                  <div style={{ fontSize: 11.5, color: '#6670a0', marginTop: 2 }}>Luotu {new Date(p.created_at).toLocaleDateString('fi-FI')}</div>
-                </button>
-                {canManage && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 2, paddingRight: 8 }}>
-                    <button title="Nimeä uudelleen" onClick={() => { setEditingId(p.id); setEditName(p.name) }} style={{ background: 'none', border: 'none', fontSize: 15, padding: 8, borderRadius: 8, color: '#6670a0' }}>✏️</button>
-                    <button title={p.archived ? 'Palauta aktiiviseksi' : 'Merkitse valmiiksi'} onClick={() => toggleArchive(p)} style={{ background: 'none', border: 'none', fontSize: 15, padding: 8, borderRadius: 8, color: '#6670a0' }}>{p.archived ? '↺' : '✓'}</button>
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        ))}
-      </div>
-
-      {canManage && !showArchived && (
-        addingNew ? (
-          <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, maxWidth: 480, margin: '0 auto', background: '#fff', borderTop: '1px solid #d0d5e8', padding: '10px 12px env(safe-area-inset-bottom, 10px)', display: 'flex', gap: 6, zIndex: 20 }}>
-            <input autoFocus placeholder="Projektin nimi (esim. asiakkaan nimi)" value={newName}
-              onChange={e => setNewName(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') addProject(); if (e.key === 'Escape') setAddingNew(false) }}
-              style={{ flex: 1, background: '#f4f6fb', border: '1px solid #d0d5e8', borderRadius: 8, padding: '10px 12px', fontSize: 14 }} />
-            <button onClick={addProject} style={{ background: '#070b17', color: '#fff', border: 'none', borderRadius: 8, padding: '0 14px', fontSize: 13, fontWeight: 700 }}>Luo</button>
-            <button onClick={() => setAddingNew(false)} style={{ background: '#eef0f2', color: '#6670a0', border: 'none', borderRadius: 8, padding: '0 14px', fontSize: 13, fontWeight: 700 }}>✕</button>
-          </div>
-        ) : (
-          <button onClick={() => { setAddingNew(true); setNewName('') }} style={{ position: 'fixed', bottom: 0, left: 0, right: 0, maxWidth: 480, margin: '0 auto', padding: '14px 16px env(safe-area-inset-bottom, 16px)', background: '#070b17', border: 'none', color: '#fff', fontSize: 14.5, fontWeight: 700, zIndex: 20 }}>
-            ＋ Uusi projekti
-          </button>
-        )
-      )}
-    </div>
+    <DiarySiteEntries
+      siteId={siteId}
+      siteLabel={siteLabel}
+      session={session}
+      canManage={canManage}
+      myName={myName}
+      companyId={companyId}
+      companyName={companyName}
+    />
   )
 }
 
 // ---------------------------------------------------------------------
-// Yhden projektin näkymä
+// Valitun työmaan päiväkirjamerkinnät
 // ---------------------------------------------------------------------
-function DiaryProjectDetail({ project, session, canManage, myName, companyId, companyName, onBack }) {
+function DiarySiteEntries({ siteId, siteLabel, session, canManage, myName, companyId, companyName }) {
   const [entries, setEntries] = useState([])
   const [loading, setLoading] = useState(true)
   const [errMsg, setErrMsg] = useState('')
@@ -249,7 +137,7 @@ function DiaryProjectDetail({ project, session, canManage, myName, companyId, co
   const load = useCallback(async () => {
     setLoading(true); setErrMsg('')
     const { data, error } = await sb.from('diary_entries').select('*')
-      .eq('project_id', project.id).eq('archived', false)
+      .eq('site_id', siteId).eq('archived', false)
       .order('created_at', { ascending: false })
     if (error) {
       console.error('diary_entries load failed:', error)
@@ -265,7 +153,7 @@ function DiaryProjectDetail({ project, session, canManage, myName, companyId, co
     }))
     setEntries(withUrls)
     setLoading(false)
-  }, [project.id])
+  }, [siteId])
 
   useEffect(() => { load() }, [load])
 
@@ -291,13 +179,13 @@ function DiaryProjectDetail({ project, session, canManage, myName, companyId, co
     try {
       let photoPath = null
       if (photoBlob) {
-        photoPath = `${companyId}/${project.id}/${uuid()}.jpg`
+        photoPath = `${companyId}/${siteId}/${uuid()}.jpg`
         const { error: upErr } = await sb.storage.from('diary-photos').upload(photoPath, photoBlob, { contentType: 'image/jpeg' })
         if (upErr) throw upErr
       }
       const phase = findPhase(phaseKey)
       const { data, error } = await sb.from('diary_entries').insert([{
-        project_id: project.id,
+        site_id: siteId,
         company_id: companyId,
         phase_key: phaseKey,
         phase_label: phase.label,
@@ -354,11 +242,11 @@ function DiaryProjectDetail({ project, session, canManage, myName, companyId, co
   }
 
   async function exportPDF() {
-    if (entries.length === 0) { alert('Ei vielä merkintöjä tässä projektissa.'); return }
+    if (entries.length === 0) { alert('Ei vielä merkintöjä tälle työmaalle.'); return }
     setPdfBuilding(true); setPdfProgress({ done: 0, total: entries.length })
     try {
       const { blob, filename } = await buildDiaryPDF({
-        projectName: project.name, entries, companyName,
+        projectName: siteLabel, entries, companyName,
         onProgress: (done, total) => setPdfProgress({ done, total }),
       })
       setPdfBlob(blob); setPdfName(filename); setPdfDownloaded(false); setPdfMode(true)
@@ -389,8 +277,7 @@ function DiaryProjectDetail({ project, session, canManage, myName, companyId, co
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '10px 16px', background: '#eef0f2' }}>
-        <button onClick={onBack} style={{ background: '#fff', border: '1px solid #d0d5e8', color: '#0d1a6e', fontSize: 12, fontWeight: 700, padding: '7px 10px', borderRadius: 20, flexShrink: 0 }}>← Projektit</button>
-        <div style={{ flex: 1, textAlign: 'center', color: '#0d1a6e', fontSize: 14, fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{project.name}</div>
+        <div style={{ flex: 1, color: '#0d1a6e', fontSize: 14, fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>📔 {siteLabel}</div>
         <button onClick={load} style={{ background: '#fff', border: '1px solid #d0d5e8', color: '#0d1a6e', fontSize: 13, padding: '7px 10px', borderRadius: 20, flexShrink: 0 }}>🔄</button>
       </div>
 
