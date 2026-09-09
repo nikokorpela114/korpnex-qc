@@ -457,7 +457,9 @@ function DashboardInner({ session, profile, logout }) {
   return (
     <div style={{ minHeight: '100vh', background: '#f6f7fb', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
       <div style={{ background: 'linear-gradient(135deg, #1560c4, #0e8fe0)', padding: '20px 30px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, boxShadow: '0 2px 12px rgba(21,96,196,0.18)' }}>
-        <div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <img src="/korpnex-icon.png" alt="Korpnex" style={{ height: 36, width: 'auto', display: 'block' }} />
+          <div>
           <div style={{ color: '#fff', fontWeight: 800, fontSize: 21, letterSpacing: 0.2 }}>KORPNEX <span style={{ opacity: 0.55, fontWeight: 500 }}>·</span> Valvomo</div>
           <div style={{ color: 'rgba(255,255,255,0.92)', fontSize: 13, marginTop: 3, display: 'flex', alignItems: 'center', gap: 6 }}>
             {editingCompanyName ? (
@@ -484,6 +486,7 @@ function DashboardInner({ session, profile, logout }) {
           </div>
           <div style={{ color: 'rgba(255,255,255,0.75)', fontSize: 12.5, marginTop: 3 }}>
             {loading ? 'Ladataan…' : `Päivitetty ${lastRefresh?.toLocaleTimeString('fi-FI')} · päivittyy automaattisesti`}
+          </div>
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>

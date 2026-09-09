@@ -45,6 +45,17 @@ function InstallerApp({ session, profile, logout }) {
   const taskRefs = useRef({}) // { [observation.id]: HTMLElement } — yleiskartan napautus vierittää oikeaan korttiin
   const [highlightId, setHighlightId] = useState(null) // hetkellinen korostus kartalta navigoitaessa
 
+  // Läheltäpiti-ilmoitus: asentaja voi ilmoittaa myös suoraan, ei vain
+  // korjata työnjohtajan/tarkastajan luomia vikoja. Ei korjausseurantaa —
+  // insertoidaan observations-tauluun type='laheltapiti', ei liitetä
+  // mihinkään tehtävälistaan (ks. loadTasks, joka suodattaa nämä pois).
+  const [nmOpen, setNmOpen] = useState(false)
+  const [nmSiteId, setNmSiteId] = useState('')
+  const [nmSev, setNmSev] = useState('Huomio')
+  const [nmNote, setNmNote] = useState('')
+  const [nmBusy, setNmBusy] = useState(false)
+  const [nmMsg, setNmMsg] = useState('')
+
   const t = key => {
     const dict = {
       title: { fi: 'Omat tehtävät', en: 'My tasks' },
@@ -62,6 +73,18 @@ function InstallerApp({ session, profile, logout }) {
       needPhoto: { fi: 'Ota kuva korjauksesta ennen kuin voit merkitä sen korjatuksi', en: 'Take a photo of the fix before marking it done' },
       compressing: { fi: 'Käsitellään kuvaa…', en: 'Processing photo…' },
       overviewTitle: { fi: '📍 Kaikki avoimet viat kartalla', en: '📍 All open faults on map' },
+      nmBtn: { fi: '⚠️ Ilmoita läheltäpiti', en: '⚠️ Report near-miss' },
+      nmTitle: { fi: 'Läheltäpiti-ilmoitus', en: 'Near-miss report' },
+      nmSiteLabel: { fi: 'Työmaa', en: 'Site' },
+      nmSevLabel: { fi: 'Vakavuus', en: 'Severity' },
+      nmNoteLabel: { fi: 'Kuvaa tilanne', en: 'Describe the situation' },
+      nmNotePlaceholder: { fi: 'Mitä tapahtui, missä, ketä koski...', en: 'What happened, where, who was involved...' },
+      nmSend: { fi: 'Lähetä ilmoitus', en: 'Send report' },
+      nmCancel: { fi: 'Peruuta', en: 'Cancel' },
+      nmSent: { fi: '✓ Ilmoitus lähetetty', en: '✓ Report sent' },
+      nmNeedNote: { fi: 'Kuvaa tilanne ennen lähettämistä', en: 'Describe the situation before sending' },
+      nmNeedSite: { fi: 'Valitse työmaa', en: 'Select a site' },
+      nmError: { fi: 'Virhe', en: 'Error' },
     }
     return dict[key]?.[lang] ?? key
   }
@@ -214,6 +237,34 @@ function InstallerApp({ session, profile, logout }) {
     setPushMsg(res.ok ? t('notifOnDone') : (res.reason || 'Ei onnistunut'))
   }
 
+  // Oletustyömaa läheltäpiti-lomakkeeseen: sama työmaa jota tehtävälistassa
+  // juuri näytetään (siteId), tai ensimmäinen yrityksen työmaa jos avoimia
+  // tehtäviä ei ole yhtään.
+  useEffect(() => {
+    if (nmSiteId) return
+    if (siteId) { setNmSiteId(siteId); return }
+    if (sites.length > 0) setNmSiteId(sites[0].id)
+  }, [siteId, sites, nmSiteId])
+
+  async function submitNearMiss() {
+    if (!nmNote.trim()) { setNmMsg(t('nmNeedNote')); return }
+    if (!nmSiteId) { setNmMsg(t('nmNeedSite')); return }
+    setNmBusy(true); setNmMsg('')
+    const siteLabel = sites.find(s => s.id === nmSiteId)?.label || ''
+    const { error } = await sb.from('observations').insert([{
+      cat: 'Läheltäpiti', sev: nmSev, note: nmNote.trim(), muu: '',
+      type: 'laheltapiti', pin_x: null, pin_y: null,
+      site: siteLabel, inspector: installer?.name || session.user.email, rivi: null,
+      status: 'avoin', assigned_installer_id: null, assigned_team_id: null, report_batch: null,
+      company_id: profile.company_id, created_at: new Date().toISOString(),
+    }])
+    setNmBusy(false)
+    if (error) { setNmMsg(t('nmError') + ': ' + error.message); return }
+    setNmNote('')
+    setNmMsg(t('nmSent'))
+    setTimeout(() => { setNmOpen(false); setNmMsg('') }, 1500)
+  }
+
   async function addFixPhoto(id, file) {
     if (!file) return
     setPhotoBusy(prev => ({ ...prev, [id]: true }))
@@ -290,9 +341,12 @@ function InstallerApp({ session, profile, logout }) {
   return (
     <div style={{ maxWidth: 480, margin: '0 auto', minHeight: '100vh', background: '#f4f6fb' }}>
       <div style={{ background: '#1560c4', padding: '16px 16px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div>
-          <div style={{ color: '#fff', fontWeight: 800, fontSize: 17 }}>{installer.name}</div>
-          <div style={{ color: 'rgba(255,255,255,0.7)', fontSize: 12 }}>{t('title')}</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <img src="/korpnex-icon.png" alt="Korpnex" style={{ height: 32, width: 'auto', display: 'block' }} />
+          <div>
+            <div style={{ color: '#fff', fontWeight: 800, fontSize: 17 }}>{installer.name}</div>
+            <div style={{ color: 'rgba(255,255,255,0.7)', fontSize: 12 }}>{t('title')}</div>
+          </div>
         </div>
         <div style={{ display: 'flex', gap: 6 }}>
           <button onClick={() => setLang(lang === 'fi' ? 'en' : 'fi')} style={{ background: 'rgba(255,255,255,0.15)', border: 'none', color: '#fff', borderRadius: 6, padding: '5px 9px', fontSize: 12, fontWeight: 700 }}>
@@ -305,9 +359,62 @@ function InstallerApp({ session, profile, logout }) {
       </div>
 
       <div style={{ padding: 12 }}>
-        <button onClick={enableNotifications} style={{ width: '100%', padding: 10, background: '#fff', border: '1px solid #d0d5e8', borderRadius: 8, fontSize: 13, color: '#1560c4', fontWeight: 600, marginBottom: 12 }}>
+        <button onClick={enableNotifications} style={{ width: '100%', padding: 10, background: '#fff', border: '1px solid #d0d5e8', borderRadius: 8, fontSize: 13, color: '#1560c4', fontWeight: 600, marginBottom: 8 }}>
           {pushMsg || t('notifOn')}
         </button>
+
+        <button onClick={() => setNmOpen(v => !v)} style={{ width: '100%', padding: 10, background: nmOpen ? '#fdf0d5' : '#fff', border: '1px solid #e0b040', borderRadius: 8, fontSize: 13, color: '#a06800', fontWeight: 700, marginBottom: 12 }}>
+          {t('nmBtn')}
+        </button>
+
+        {nmOpen && (
+          <div style={{ background: '#fff', border: '1px solid #e0b040', borderRadius: 10, padding: 12, marginBottom: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: '#a06800' }}>{t('nmTitle')}</div>
+
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: '#6670a0', marginBottom: 4 }}>{t('nmSiteLabel')}</div>
+              <select value={nmSiteId} onChange={e => setNmSiteId(e.target.value)} style={{ width: '100%', padding: 9, borderRadius: 8, border: '1px solid #d0d5e8', fontSize: 13.5, background: '#fff' }}>
+                {sites.length === 0 && <option value="">—</option>}
+                {sites.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
+              </select>
+            </div>
+
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: '#6670a0', marginBottom: 4 }}>{t('nmSevLabel')}</div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                {['Kriittinen', 'Huomio', 'Info'].map(s => (
+                  <button key={s} onClick={() => setNmSev(s)} style={{
+                    flex: 1, padding: '8px 4px', borderRadius: 8, fontSize: 12, fontWeight: 700,
+                    border: `1px solid ${nmSev === s ? sevColor[s] : '#d0d5e8'}`,
+                    background: nmSev === s ? sevBg[s] : '#eef0f7',
+                    color: nmSev === s ? sevColor[s] : '#6670a0'
+                  }}>{s}</button>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: '#6670a0', marginBottom: 4 }}>{t('nmNoteLabel')}</div>
+              <textarea
+                value={nmNote}
+                onChange={e => setNmNote(e.target.value)}
+                placeholder={t('nmNotePlaceholder')}
+                style={{ width: '100%', padding: 9, borderRadius: 8, border: '1px solid #d0d5e8', fontSize: 13.5, resize: 'none', minHeight: 64, lineHeight: 1.5, boxSizing: 'border-box' }}
+              />
+            </div>
+
+            {nmMsg && <div style={{ fontSize: 12.5, color: nmMsg === t('nmSent') ? '#1a7a45' : '#b02828', fontWeight: 600 }}>{nmMsg}</div>}
+
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={() => { setNmOpen(false); setNmMsg('') }} style={{ flex: 1, padding: 10, background: '#eef0f7', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, color: '#6670a0' }}>
+                {t('nmCancel')}
+              </button>
+              <button onClick={submitNearMiss} disabled={nmBusy} style={{ flex: 2, padding: 10, background: '#a06800', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 700, color: '#fff', opacity: nmBusy ? 0.6 : 1 }}>
+                {nmBusy ? t('loading') : t('nmSend')}
+              </button>
+            </div>
+          </div>
+        )}
 
         {mapData && overviewPins.length > 0 && (
           <div style={{ marginBottom: 14 }}>
