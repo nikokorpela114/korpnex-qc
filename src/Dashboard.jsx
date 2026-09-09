@@ -532,7 +532,7 @@ function DashboardInner({ session, profile, logout }) {
             onChange={e => setSearch(e.target.value)}
             style={{ ...selectStyle, flex: 1, minWidth: 220 }}
           />
-          <div style={{ display: 'flex', gap: 3, background: '#e9ebf6', padding: 4, borderRadius: 10, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: 3, background: '#eef0f2', padding: 4, borderRadius: 10, flexWrap: 'wrap' }}>
             <TabButton active={tab === 'open'} onClick={() => { setTab('open'); clearSelection() }}>Avoimet ({openObs.length})</TabButton>
             <TabButton active={tab === 'fixed'} onClick={() => { setTab('fixed'); clearSelection() }}>Korjatut ({fixedObs.length})</TabButton>
             <TabButton active={tab === 'nearmiss'} onClick={() => { setTab('nearmiss'); clearSelection() }}>Läheltäpiti ({nearMissObs.length})</TabButton>
@@ -1251,7 +1251,7 @@ function TabButton({ active, onClick, children }) {
       onClick={onClick}
       style={{
         padding: '7.5px 14px', borderRadius: 7, border: 'none', fontSize: 13, fontWeight: 700, cursor: 'pointer',
-        background: active ? '#1560c4' : 'transparent', color: active ? '#fff' : '#4a5480',
+        background: active ? '#1560c4' : 'transparent', color: active ? '#fff' : '#5b6270',
         transition: 'background 0.15s, color 0.15s',
       }}
     >
