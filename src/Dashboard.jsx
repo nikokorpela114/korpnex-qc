@@ -888,6 +888,7 @@ function DashboardInner({ session, profile, logout }) {
                   profile={profile}
                   siteId={diarySiteFilter || sites[0]?.id}
                   siteLabel={sites.find(s => s.id === (diarySiteFilter || sites[0]?.id))?.label || ''}
+                  readOnly
                 />
               </div>
             )}

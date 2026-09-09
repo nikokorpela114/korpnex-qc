@@ -20,6 +20,13 @@
 // Yksittäisen merkinnän muokkaus/poisto onnistuu sen tekijältä itseltään tai
 // adminilta. PDF-vienti on rajattu adminille (Valvomo-tili).
 //
+// readOnly-propi (Dashboard.jsx/Valvomo käyttää tätä): Valvomo on pelkkä
+// tietokoneella käytettävä seuranta- ja hallintanäkymä — sieltä EI koskaan
+// tehdä/muokata/poisteta merkintöjä, vain katsotaan asentajien/tarkastajien
+// tallentamia merkintöjä ja viedään ne PDF:ksi. readOnly={true} piilottaa
+// "Uusi merkintä" -painikkeen ja muokkaus/poisto-linkit kokonaan, myös
+// adminilta — Vie PDF pysyy käytössä.
+//
 // Tyylitys inline style -objekteina (ei erillistä CSS-template-stringiä),
 // samaa käytäntöä kuin App.jsx/InstallerView.jsx/Dashboard.jsx, ja
 // värimaailma yhtenäistetty muun sovelluksen navy+sininen-brändiin
@@ -69,7 +76,7 @@ function compressForUpload(file, maxDim = 1600, quality = 0.75) {
   })
 }
 
-export default function Diary({ session, profile, siteId, siteLabel }) {
+export default function Diary({ session, profile, siteId, siteLabel, readOnly = false }) {
   const companyId = profile.company_id
   const canManage = profile.role === 'admin'
   const myName = profile.name || session.user.email
@@ -100,6 +107,7 @@ export default function Diary({ session, profile, siteId, siteLabel }) {
       myName={myName}
       companyId={companyId}
       companyName={companyName}
+      readOnly={readOnly}
     />
   )
 }
@@ -107,7 +115,7 @@ export default function Diary({ session, profile, siteId, siteLabel }) {
 // ---------------------------------------------------------------------
 // Valitun työmaan päiväkirjamerkinnät
 // ---------------------------------------------------------------------
-function DiarySiteEntries({ siteId, siteLabel, session, canManage, myName, companyId, companyName }) {
+function DiarySiteEntries({ siteId, siteLabel, session, canManage, myName, companyId, companyName, readOnly }) {
   const [entries, setEntries] = useState([])
   const [loading, setLoading] = useState(true)
   const [errMsg, setErrMsg] = useState('')
@@ -157,9 +165,14 @@ function DiarySiteEntries({ siteId, siteLabel, session, canManage, myName, compa
 
   useEffect(() => { load() }, [load])
 
-  function canEdit(e) { return canManage || e.created_by === session.user.id }
+  // Valvomo (readOnly) on tarkoituksella pelkkä seuranta- ja hallintanäkymä
+  // tietokoneella — merkintöjä ei tehdä/muokata/poisteta sieltä, vain
+  // katsotaan ja viedään PDF:ksi. Muokkaus/poisto on siis aina pois päältä
+  // readOnly-tilassa, myös adminilta.
+  function canEdit(e) { return !readOnly && (canManage || e.created_by === session.user.id) }
 
   function openComposer() {
+    if (readOnly) return
     setComposerOpen(true)
     setPhotoBlob(null); setPhotoPreview(null)
     setPhaseKey(''); setSubphase(''); setSubphaseCustom(false); setNote('')
@@ -288,7 +301,11 @@ function DiarySiteEntries({ siteId, siteLabel, session, canManage, myName, compa
         {!loading && entries.length === 0 && !errMsg && (
           <div style={{ textAlign: 'center', padding: '48px 20px', color: '#6670a0', fontSize: 13.5, lineHeight: 1.6 }}>
             <div style={{ fontSize: 44, opacity: 0.3, marginBottom: 10 }}>📷</div>
-            <p>Ei vielä merkintöjä.<br />Ota ensimmäinen kuva alta ↓</p>
+            {readOnly ? (
+              <p>Ei vielä merkintöjä tälle työmaalle.</p>
+            ) : (
+              <p>Ei vielä merkintöjä.<br />Ota ensimmäinen kuva alta ↓</p>
+            )}
           </div>
         )}
 
@@ -337,9 +354,11 @@ function DiarySiteEntries({ siteId, siteLabel, session, canManage, myName, compa
       </div>
 
       <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, maxWidth: 480, margin: '0 auto', background: '#eef0f2', borderTop: '1px solid #d0d5e8', padding: '10px 14px env(safe-area-inset-bottom, 14px)', display: 'flex', gap: 8, zIndex: 20 }}>
-        <button onClick={openComposer} style={{ flex: 1.3, padding: 13, background: '#070b17', border: 'none', borderRadius: 8, color: '#fff', fontSize: 14, fontWeight: 700 }}>📷 Uusi merkintä</button>
+        {!readOnly && (
+          <button onClick={openComposer} style={{ flex: 1.3, padding: 13, background: '#070b17', border: 'none', borderRadius: 8, color: '#fff', fontSize: 14, fontWeight: 700 }}>📷 Uusi merkintä</button>
+        )}
         {canManage && (
-          <button onClick={exportPDF} disabled={pdfBuilding} style={{ flex: 1, padding: 13, background: '#fff', border: '1px solid #d0d5e8', borderRadius: 8, color: '#0d1a6e', fontSize: 13, fontWeight: 700, opacity: pdfBuilding ? 0.6 : 1 }}>
+          <button onClick={exportPDF} disabled={pdfBuilding} style={{ flex: 1, padding: 13, background: readOnly ? '#070b17' : '#fff', border: readOnly ? 'none' : '1px solid #d0d5e8', borderRadius: 8, color: readOnly ? '#fff' : '#0d1a6e', fontSize: 13, fontWeight: 700, opacity: pdfBuilding ? 0.6 : 1 }}>
             {pdfBuilding ? `Kootaan… ${pdfProgress.done}/${pdfProgress.total}` : '📄 Vie PDF'}
           </button>
         )}

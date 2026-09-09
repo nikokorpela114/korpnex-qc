@@ -925,7 +925,7 @@ function InspectorApp({ session, profile, logout }) {
                 {(o.type || 'vika') === 'vika' ? (
                   <div>
                     <div style={labelStyle}>Vika</div>
-                    <input style={inputStyle} placeholder="Kirjoita havaittu vika, esim. 'Kaapelointi vaurioitunut'..." value={o.cat} onChange={e => updateObs(o.id, 'cat', e.target.value)} />
+                    <input style={inputStyle} placeholder="Kirjoita havaittu vika, esim. 'Betonivalu halkeillut nurkasta'..." value={o.cat} onChange={e => updateObs(o.id, 'cat', e.target.value)} />
                   </div>
                 ) : (
                   <div>
