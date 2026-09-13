@@ -262,14 +262,24 @@ function DashboardInner({ session, profile, logout }) {
       const dateStr = new Date().toLocaleDateString('fi-FI')
       const sevCol = { Kriittinen: [180, 40, 40], Huomio: [180, 120, 0], Info: [30, 140, 80] }
 
-      doc.setFillColor(21, 96, 196)
-      doc.rect(0, 0, W, 28, 'F')
-      doc.setFont('helvetica', 'bold'); doc.setFontSize(13); doc.setTextColor(245, 168, 0)
-      doc.text((company?.name || 'KORPNEX').toUpperCase(), M, 12)
+      // Otsikon värimaailma yhtenäistetty muun sovelluksen navy-brändiin
+      // (#070b17 + valkoinen), samat värit/rakenne kuin diaryPdfBuilder.js:n
+      // Päiväkirja-PDF:ssä ja sovelluksen omassa navigaatiopalkissa —
+      // aiemmin tämä käytti App.jsx:n vanhempaa sininen+kulta-teemaa, joka
+      // ei enää vastaa nykyistä ilmettä.
+      doc.setFillColor(7, 11, 23) // #070b17
+      doc.rect(0, 0, W, 26, 'F')
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(13); doc.setTextColor(255, 255, 255)
+      doc.text('KORPNEX', M, 11)
       doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(255, 255, 255)
-      doc.text(`Työmaan koko historia — ${siteFilter}`, M, 19)
-      doc.setFontSize(9); doc.setTextColor(180, 200, 255)
-      doc.text(dateStr, W - M, 12, { align: 'right' })
+      doc.text('Työmaan koko historia', M, 18)
+      doc.setFontSize(9); doc.setTextColor(190, 196, 220)
+      doc.text(dateStr, W - M, 11, { align: 'right' })
+
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(16); doc.setTextColor(20, 24, 58)
+      doc.text(siteFilter, M, y)
+      y += 10
+      doc.setDrawColor(200, 203, 215); doc.line(M, y, W - M, y); y += 8
 
       const counts = {
         avoin: siteObs.filter(o => (o.type || 'vika') !== 'laheltapiti' && o.status !== 'korjattu' && !o.hidden_at).length,
