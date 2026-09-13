@@ -3,26 +3,32 @@ import ReactDOM from 'react-dom/client'
 import App from './App.jsx'
 import './index.css'
 
-// KORJAUS: "Lisää Koti-valikkoon" (iOS) avasi Valvomon/Asentajan URL:sta
-// huolimatta AINA Työnjohto-appin. Syy: index.html:n <link rel="manifest">
-// oli kiinteä, ja nykyaikainen iOS Safari lukee koti-kuvakkeen kohteen (ja
-// nimen) linkitetystä manifest.json:sta, EI siitä URL:sta millä oikeasti
-// seisottiin kun "Lisää Koti-valikkoon" painettiin. Koska Valvomo/Työnjohto/
-// Asentaja ovat samaa sivustoa erotettuna vain ?valvomo/?asentaja-query-
-// parametrilla, kaikki kolme jakoivat saman manifestin (start_url "/") →
-// kaikki kotikuvakkeet avasivat Työnjohdon.
+// HUOM (korjattu bugi, v2 — ensimmäinen yritys ei riittänyt): "Lisää Koti-
+// valikkoon" (iOS) avasi Valvomon/Asentajan URL:sta huolimatta AINA
+// Työnjohto-appin, JOPA sen jälkeen kun tämä koodi vaihtoi manifest-linkin/
+// otsikon ajonaikaisesti DOM:issa. Syy selvisi vasta kun bugi toistui myös
+// täysin tyhjässä Yksityinen selaus -istunnossa (ei mitään vanhaa
+// välimuistia): iOS Safarin "Lisää Koti-valikkoon" lukee kotikuvakkeen
+// kohteen/nimen sivun ALKUPERÄISESTÄ, PALVELIMEN TARJOAMASTA HTML:stä — ei
+// JavaScriptin ajonaikaisesti muokkaamasta DOM:ista. Koska Valvomo/Työnjohto/
+// Asentaja jakoivat SAMAN staattisen index.html-tiedoston (erottelu oli vain
+// ?query-parametrilla), palvelin tarjosi AINA samaa, oletus-HTML:ää
+// riippumatta query-parametrista — JS ehti vaihtaa sen vasta sivun latauduttua,
+// mikä oli jo myöhässä.
 //
-// Korjattu vaihtamalla <link id="app-manifest"> ja <meta id="apple-title-
-// meta">/<title> OIKEAAN, näkymäkohtaiseen manifestiin JA nimeen heti
-// käynnistyksessä, ennen React-renderöintiä — jotta ne ovat oikein DOM:ssa
-// hyvissä ajoin ennen kuin käyttäjä ehtii avata Jaa-valikon ja painaa
-// "Lisää Koti-valikkoon". Jos käyttäjällä on jo VANHA, väärään paikkaan
-// osoittava kotikuvake, se on poistettava ja lisättävä uudelleen — tämä
-// korjaus vaikuttaa vain UUSIIN, tämän jälkeen lisättyihin kuvakkeisiin.
+// OIKEA korjaus (ks. App.jsx:n ja vite.config.js:n vastaavat HUOMit): jokainen
+// näkymä sai OMAN, aidosti erillisen index.html:n omalla URL-POLULLAAN
+// (/valvomo/, /asentaja/), joissa oikea manifesti/otsikko on VALMIIKSI
+// HTML:ssä — ei enää JS:n varassa. Tämä alla oleva koodi on silti jätetty
+// varmuuden vuoksi (esim. jos joku avaa vanhan ?asentaja-query-linkin
+// suoraan juuripolulta) — se ei ole enää ainoa eikä ensisijainen korjaus.
 ;(function fixHomeScreenTarget() {
   try {
+    const path = window.location.pathname
     const params = new URLSearchParams(window.location.search)
-    const view = params.has('asentaja') ? 'asentaja' : params.has('valvomo') ? 'valvomo' : 'tyonjohto'
+    const view = (path.startsWith('/asentaja') || params.has('asentaja')) ? 'asentaja'
+      : (path.startsWith('/valvomo') || params.has('valvomo')) ? 'valvomo'
+      : 'tyonjohto'
     const NAMES = { tyonjohto: 'Korpnex Työnjohto', valvomo: 'Korpnex Valvomo', asentaja: 'Korpnex Asentaja' }
     const name = NAMES[view]
     const manifestLink = document.getElementById('app-manifest')

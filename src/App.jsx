@@ -18,14 +18,35 @@ let idCounter = 0
 const DRAFT_KEY_PREFIX = 'korpnex_qc_draft_v1_' // + auth user id — ks. HUOM alla
 
 export default function App() {
-  // ?asentaja avaa karsitun asentajanäkymän tämän saman appin sisällä —
-  // sama Vite-projekti, sama Netlify-deploy, ei erillistä sivustoa.
-  if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('asentaja')) {
+  // HUOM (korjattu bugi — iOS "Lisää Koti-valikkoon" avasi aina Työnjohdon):
+  // Näkymä tunnistettiin aiemmin VAIN URL:n query-parametrista (?asentaja /
+  // ?valvomo), ja kaikki kolme näkymää jakoivat SAMAN, staattisen
+  // index.html-tiedoston. iOS Safarin "Lisää Koti-valikkoon" -toiminto lukee
+  // kotikuvakkeen kohteen ja nimen suoraan sivun ALKUPERÄISESTÄ, palvelimen
+  // tarjoamasta HTML:stä (manifest-linkki, otsikko) — EI sitä miltä
+  // query-parametrilliselta osoitteelta sivu oikeasti avattiin, eikä sitä,
+  // miten JavaScript on DOM:ia ajonaikaisesti muokannut. Koska query-
+  // parametrilla ei voi erottaa MITÄ TIEDOSTOA palvelin tarjoaa, jokainen
+  // kotikuvake päätyi aina samaan, oletuksena tarjottuun index.html:ään
+  // (Työnjohto) riippumatta mille osoitteelle se oikeasti tehtiin.
+  //
+  // Korjattu siirtymällä OMIIN URL-POLKUIHIN (/valvomo/, /asentaja/), joille
+  // on build-vaiheessa (ks. vite.config.js) generoitu OMAT, aidosti erilliset
+  // index.html-tiedostot — jokaisella oma <link rel="manifest"> ja <title>
+  // valmiiksi HTML:ssä, ei JS:n ajonaikaisesti vaihtamana. Vanhat
+  // ?asentaja/?valvomo-query-parametrit toimivat EDELLEEN (sama sisältö
+  // näkyy), mutta EIVÄT enää ole suositeltu tapa — "Lisää Koti-valikkoon"
+  // pitää tehdä uusilta /valvomo/- ja /asentaja/-osoitteilta, jotta iOS
+  // näkee oikean manifestin suoraan HTML:stä.
+  const path = typeof window !== 'undefined' ? window.location.pathname : ''
+  const search = typeof window !== 'undefined' ? window.location.search : ''
+  const isAsentaja = path.startsWith('/asentaja') || new URLSearchParams(search).has('asentaja')
+  const isValvomo = path.startsWith('/valvomo') || new URLSearchParams(search).has('valvomo')
+
+  if (isAsentaja) {
     return <InstallerView />
   }
-  // ?valvomo avaa työnjohtajan työpöytänäkymän — kuka korjaa mitä, mikä on
-  // avoinna, mikä korjattu. Sama periaate kuin ?asentaja.
-  if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('valvomo')) {
+  if (isValvomo) {
     return <Dashboard />
   }
   // Oletusnäkymä (ei query-parametria) = työnjohtajan sovellus (rooli-koodi
@@ -354,7 +375,7 @@ function InspectorApp({ session, profile, logout }) {
       installerId: assignInstallerId,
       title: 'Uusi tarkistuslista',
       body: `${updated.length} havaintoa — ${site}`,
-      url: '/?asentaja=1',
+      url: '/asentaja/',
       tag: reportBatch,
     })
     setAssignMsg(res?.sent > 0 ? `✓ Lähetetty ${installer?.name || ''}` : `✓ Tallennettu ${installer?.name || ''} (asentaja ei ehkä ole vielä ottanut ilmoituksia käyttöön)`)
