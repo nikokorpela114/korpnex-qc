@@ -54,6 +54,7 @@ function DashboardInner({ session, profile, logout }) {
   const [selected, setSelected] = useState(new Set())
   const [busy, setBusy] = useState(false)
   const [lightboxSrc, setLightboxSrc] = useState(null) // korjauskuvan suurennettu näkymä
+  const [historyExportBusy, setHistoryExportBusy] = useState(false) // "Lataa työmaan koko historia" -PDF kesken
 
   // --- Päiväkirja-välilehden tila (työmaa = päiväkirjan "projekti", ks. Diary.jsx) ---
   const [diarySiteFilter, setDiarySiteFilter] = useState('')
@@ -232,6 +233,134 @@ function DashboardInner({ session, profile, logout }) {
     const { error } = await sb.from('observations').delete().in('id', [...selected])
     if (error) { console.error(error); alert('Poisto epäonnistui: ' + error.message + '\n\nJos virhe mainitsee "permission denied", teams_schema.sql:n DELETE-oikeutta ei ole ajettu Supabaseen.') }
     clearSelection(); setBusy(false); load()
+  }
+
+  // "Lataa työmaan koko historia" — pyydetty PDF-vienti YHDELLE valitulle
+  // työmaalle, joka sisältää KAIKEN sille kirjatun, tilasta/tyypistä
+  // riippumatta: avoimet ja korjatut viat, läheltäpidot, JA piilotetut (jotka
+  // eivät näy missään muussa välilehdessä oletuksena). Käyttää suoraan
+  // koko `obs`-taulua (ei openObs/fixedObs-suodattimia, jotka piilottavat
+  // tarkoituksella osan), rajattuna vain siteFilter-työmaahan, aikajärjestyksessä.
+  async function exportSiteHistoryPDF() {
+    if (!siteFilter) {
+      alert('Valitse ensin yksi työmaa yllä olevasta pudotusvalikosta — koko historia ladataan aina yhdelle työmaalle kerrallaan.')
+      return
+    }
+    const siteObs = obs
+      .filter(o => o.site === siteFilter)
+      .sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0))
+    if (siteObs.length === 0) {
+      alert('Tälle työmaalle ei ole kirjattu yhtään havaintoa.')
+      return
+    }
+    setHistoryExportBusy(true)
+    try {
+      const { jsPDF } = await import('jspdf')
+      const doc = new jsPDF({ unit: 'mm', format: 'a4' })
+      const W = 210, M = 14, CW = W - M * 2
+      let y = 38
+      const dateStr = new Date().toLocaleDateString('fi-FI')
+      const sevCol = { Kriittinen: [180, 40, 40], Huomio: [180, 120, 0], Info: [30, 140, 80] }
+
+      doc.setFillColor(21, 96, 196)
+      doc.rect(0, 0, W, 28, 'F')
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(13); doc.setTextColor(245, 168, 0)
+      doc.text((company?.name || 'KORPNEX').toUpperCase(), M, 12)
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(255, 255, 255)
+      doc.text(`Työmaan koko historia — ${siteFilter}`, M, 19)
+      doc.setFontSize(9); doc.setTextColor(180, 200, 255)
+      doc.text(dateStr, W - M, 12, { align: 'right' })
+
+      const counts = {
+        avoin: siteObs.filter(o => (o.type || 'vika') !== 'laheltapiti' && o.status !== 'korjattu' && !o.hidden_at).length,
+        korjattu: siteObs.filter(o => (o.type || 'vika') !== 'laheltapiti' && o.status === 'korjattu' && !o.hidden_at).length,
+        laheltapiti: siteObs.filter(o => (o.type || 'vika') === 'laheltapiti' && !o.hidden_at).length,
+        piilotettu: siteObs.filter(o => !!o.hidden_at).length,
+      }
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(20, 20, 60)
+      doc.text(
+        `Yhteensä ${siteObs.length} havaintoa  ·  Avoimia ${counts.avoin}  ·  Korjattu ${counts.korjattu}  ·  Läheltäpiti ${counts.laheltapiti}  ·  Piilotettu ${counts.piilotettu}`,
+        M, y
+      )
+      y += 8
+      doc.setDrawColor(200, 205, 220); doc.line(M, y, W - M, y); y += 8
+
+      async function embedImage(dataUrl, label) {
+        if (!dataUrl) return
+        try {
+          const img = new Image(); img.src = dataUrl
+          await new Promise(r => { img.onload = r; img.onerror = r })
+          const nw = img.naturalWidth || 0, nh = img.naturalHeight || 0
+          if (!nw || !nh) return
+          const sc = Math.min((CW - 10) / nw, 70 / nh)
+          const dw = nw * sc, dh = nh * sc
+          if (y + dh + 8 > 278) { doc.addPage(); y = 18 }
+          doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(140, 140, 140)
+          doc.text(label, M + 8, y + 3)
+          doc.addImage(dataUrl, 'JPEG', M + 8, y + 4, dw, dh)
+          y += dh + 8
+        } catch (e) { console.error('exportSiteHistoryPDF: kuvan upotus epäonnistui', e) }
+      }
+
+      const statusLabel = o => o.hidden_at
+        ? 'Piilotettu'
+        : (o.type || 'vika') === 'laheltapiti' ? 'Läheltäpiti' : (o.status === 'korjattu' ? 'Korjattu' : 'Avoin')
+
+      for (const o of siteObs) {
+        if (y + 24 > 278) { doc.addPage(); y = 18 }
+        const sc = sevCol[o.sev] || [80, 80, 80]
+        const installerName = o.assigned_installer_id ? (installerById.get(o.assigned_installer_id)?.name || null) : null
+
+        doc.setFillColor(...sc); doc.roundedRect(M, y, CW, 7, 1.2, 1.2, 'F')
+        doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(255, 255, 255)
+        doc.text(`${o.cat || 'Vika'}  ·  ${o.sev || 'Info'}  ·  ${statusLabel(o)}`, M + 3, y + 5)
+        doc.text(fmtTime(o.created_at), W - M - 3, y + 5, { align: 'right' })
+        y += 10.5
+
+        const metaLine = [
+          o.rivi ? `Paikka: ${o.rivi}` : null,
+          o.inspector ? `Kirjaaja: ${o.inspector}` : null,
+          installerName ? `Asentaja: ${installerName}` : null,
+          o.fixed_at ? `Korjattu: ${fmtTime(o.fixed_at)}` : null,
+          o.hidden_at ? `Piilotettu: ${fmtTime(o.hidden_at)}` : null,
+        ].filter(Boolean).join('   ·   ')
+        if (metaLine) {
+          doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(90, 90, 110)
+          doc.text(metaLine, M + 2, y); y += 5.5
+        }
+
+        if (o.note) {
+          doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(40, 40, 40)
+          const lines = doc.splitTextToSize(o.note, CW - 4)
+          if (y + lines.length * 5 > 278) { doc.addPage(); y = 18 }
+          doc.text(lines, M + 2, y); y += lines.length * 5 + 2
+        }
+
+        await embedImage(o.photo, 'Kuva')
+        await embedImage(o.fixed_photo, 'Korjauskuva')
+
+        y += 3
+        doc.setDrawColor(230, 232, 240); doc.line(M, y, W - M, y); y += 6
+      }
+
+      const tp = doc.getNumberOfPages()
+      for (let p = 1; p <= tp; p++) {
+        doc.setPage(p); doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(160, 160, 160)
+        doc.text(`${company?.name || 'Korpnex Oy'} · Työmaan koko historia · ${dateStr}`, M, 292)
+        doc.text(`${p} / ${tp}`, W - M, 292, { align: 'right' })
+      }
+
+      const blob = doc.output('blob')
+      const fn = `Historia_${siteFilter.replace(/\s+/g, '_')}_${dateStr.replace(/\./g, '-')}.pdf`
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a'); a.href = url; a.download = fn
+      document.body.appendChild(a); a.click(); document.body.removeChild(a)
+      setTimeout(() => URL.revokeObjectURL(url), 3000)
+    } catch (e) {
+      console.error('exportSiteHistoryPDF failed:', e)
+      alert('PDF:n luonti epäonnistui — katso selaimen konsoli.')
+    }
+    setHistoryExportBusy(false)
   }
 
   // --- Yrityksen nimi ---
@@ -428,6 +557,14 @@ function DashboardInner({ session, profile, logout }) {
             <option value="">Kaikki työmaat</option>
             {sites.map(s => <option key={s.id} value={s.label}>{s.label}</option>)}
           </select>
+          <button
+            onClick={exportSiteHistoryPDF}
+            disabled={historyExportBusy}
+            title={siteFilter ? `Lataa PDF: kaikki ${siteFilter}-työmaan havainnot (avoimet, korjatut, läheltäpidot, piilotetut)` : 'Valitse ensin työmaa vasemmalta'}
+            style={{ background: '#fff', border: '1px solid #d0d5e8', color: '#0d1a6e', borderRadius: 10, padding: '10px 14px', fontSize: 13, fontWeight: 700, cursor: historyExportBusy ? 'default' : 'pointer', opacity: historyExportBusy ? 0.6 : 1, whiteSpace: 'nowrap' }}
+          >
+            {historyExportBusy ? 'Kootaan…' : '📥 Lataa työmaan koko historia'}
+          </button>
           <input
             placeholder="Hae (vikatyyppi, paikka, työnjohtaja)…"
             value={search}
