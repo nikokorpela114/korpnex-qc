@@ -280,7 +280,7 @@ function InstallerApp({ session, profile, logout }) {
       cat: 'Läheltäpiti', sev: nmSev, note: nmNote.trim(), muu: '',
       type: 'laheltapiti', pin_x: null, pin_y: null, photo: nmPhoto,
       site: siteLabel, inspector: installer?.name || session.user.email, rivi: null,
-      status: 'avoin', assigned_installer_id: null, assigned_team_id: null, report_batch: null,
+      status: 'avoin', assigned_installer_id: null, report_batch: null,
       company_id: profile.company_id, created_at: new Date().toISOString(),
     }])
     setNmBusy(false)
