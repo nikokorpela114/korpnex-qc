@@ -11,21 +11,16 @@
   <link rel="apple-touch-icon" href="/apple-touch-icon.png">
   <!--
     HUOM (korjattu bugi — "Lisää Koti-valikkoon" avasi aina Työnjohto-appin):
-    Kaikki kolme näkymää (Valvomo/Työnjohto/Asentaja) ovat samaa sivustoa,
-    eroteltuna vain URL:n query-parametrilla (?valvomo / ?asentaja). Tämä
-    <link rel="manifest">, id="app-manifest", oli KIINTEÄ ja osoitti aina
-    manifestiin jonka start_url on "/" (pelkkä Työnjohto) — nykyaikainen iOS
-    Safari lukee "Lisää Koti-valikkoon" -kuvakkeen kohteen JA nimen tästä
-    manifestista, EI siitä URL:sta jolla oikeasti seisottiin, jos manifest on
-    linkitetty. Siksi Valvomon/Asentajan kotivalikko-kuvake avasi aina
-    Työnjohdon, riippumatta siitä miltä sivulta "Lisää Koti-valikkoon"
-    painettiin. Korjattu: src/main.jsx vaihtaa tämän linkin href:n (ja
-    apple-mobile-web-app-title-metatagin sisällön yllä) OIKEAAN,
-    näkymäkohtaiseen manifestiin (manifest-valvomo.json / manifest-asentaja.json
-    / manifest-tyonjohto.json) heti sovelluksen käynnistyessä, ennen kuin
-    käyttäjä ehtii painaa "Lisää Koti-valikkoon" — jokainen näkymä saa nyt
-    oman, oikein toimivan pikakuvakkeen JA oman nimensä (Korpnex Työnjohto /
-    Korpnex Valvomo / Korpnex Asentaja) kotivalikossa.
+    tämä on TYÖNJOHDON oma index.html, osoitteessa "/". Valvomolla ja
+    Asentajalla on OMAT, tähän nähden erilliset index.html-tiedostonsa
+    (valvomo/index.html, asentaja/index.html — ks. niiden omat HUOM-kommentit
+    ja vite.config.js), koska iOS Safarin "Lisää Koti-valikkoon" lukee
+    kotikuvakkeen kohteen/nimen suoraan PALVELIMEN TARJOAMASTA HTML:stä eikä
+    JavaScriptin ajonaikaisesti muokkaamasta versiosta — kolmen näkymän
+    jakama YKSI staattinen tiedosto (erotellun vain ?query-parametrilla) ei
+    siis RIITTÄNYT korjaukseksi, vaikka manifest-linkki olisi vaihdettu JS:llä.
+    src/main.jsx:n ajonaikainen vaihto on silti jätetty varmuuden vuoksi
+    (esim. vanhojen ?asentaja/?valvomo-linkkien varalta).
   -->
   <link rel="manifest" href="/manifest-tyonjohto.json" id="app-manifest">
   <title>Korpnex Työnjohto</title>
