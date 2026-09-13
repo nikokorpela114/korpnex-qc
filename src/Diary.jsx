@@ -270,19 +270,19 @@ function DiarySiteEntries({ siteId, siteLabel, session, canManage, myName, compa
     setPdfBuilding(false)
   }
 
-  const shareSupported = typeof navigator !== 'undefined' && !!navigator.share && !!navigator.canShare
+  // HUOM: aiemmin tässä käytettiin navigator.share():ia (OS:n jakovalikko)
+  // aina kun selain/laite tuki sitä — mutta se vaatii ylimääräisen
+  // "Tallenna tiedostoihin" -välivaiheen jakovalikosta, ennen kuin PDF on
+  // oikeasti laitteella. Pyynnöstä: PDF ladataan AINA suoraan laitteen
+  // Lataukset-kansioon, jotta sen voi heti liittää mihin tahansa itse
+  // (sähköposti, WhatsApp jne.) — ei jakovalikkoa väliin.
   async function sharePDF() {
     if (!pdfBlob) return
-    const file = new File([pdfBlob], pdfName, { type: 'application/pdf' })
-    if (navigator.canShare?.({ files: [file] })) {
-      try { await navigator.share({ files: [file], title: pdfName }) } catch {}
-    } else {
-      const url = URL.createObjectURL(pdfBlob)
-      const a = document.createElement('a'); a.href = url; a.download = pdfName
-      document.body.appendChild(a); a.click(); document.body.removeChild(a)
-      setTimeout(() => URL.revokeObjectURL(url), 3000)
-      setPdfDownloaded(true)
-    }
+    const url = URL.createObjectURL(pdfBlob)
+    const a = document.createElement('a'); a.href = url; a.download = pdfName
+    document.body.appendChild(a); a.click(); document.body.removeChild(a)
+    setTimeout(() => URL.revokeObjectURL(url), 3000)
+    setPdfDownloaded(true)
   }
 
   const groups = groupEntriesByPhase(entries)
@@ -409,13 +409,11 @@ function DiarySiteEntries({ siteId, siteLabel, session, canManage, myName, compa
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: 'env(safe-area-inset-top, 12px) 16px 12px', background: '#070b17' }}>
             <button onClick={() => setPdfMode(false)} style={{ background: 'rgba(255,255,255,0.2)', border: 'none', color: '#fff', width: 32, height: 32, borderRadius: '50%', fontSize: 16 }}>✕</button>
             <span style={{ fontSize: 15, fontWeight: 700, color: '#fff' }}>PDF valmis</span>
-            <button onClick={sharePDF} style={{ background: '#f5a800', border: 'none', color: '#070b17', fontSize: 12.5, fontWeight: 700, padding: '8px 14px', borderRadius: 8 }}>{shareSupported ? '⬆ Jaa' : '⬇ Lataa PDF'}</button>
+            <button onClick={sharePDF} style={{ background: '#f5a800', border: 'none', color: '#070b17', fontSize: 12.5, fontWeight: 700, padding: '8px 14px', borderRadius: 8 }}>⬇ Lataa PDF</button>
           </div>
           <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 20, padding: 32, textAlign: 'center' }}>
             <div style={{ fontSize: 60 }}>{pdfDownloaded ? '✅' : '📄'}</div>
-            {shareSupported ? (
-              <p style={{ fontSize: 14, color: '#6670a0', lineHeight: 1.6 }}>Paina <strong style={{ color: '#0d1a6e' }}>Jaa ⬆</strong> avataksesi jakovalikon — esim. sähköpostiin tai asiakkaalle.</p>
-            ) : pdfDownloaded ? (
+            {pdfDownloaded ? (
               <p style={{ fontSize: 14, color: '#1a8a50', fontWeight: 600, lineHeight: 1.6 }}>PDF ladattu koneen Lataukset-kansioon.<br /><span style={{ color: '#6670a0', fontWeight: 400 }}>({pdfName})</span></p>
             ) : (
               <p style={{ fontSize: 14, color: '#6670a0', lineHeight: 1.6 }}>Paina <strong style={{ color: '#0d1a6e' }}>Lataa PDF</strong> tallentaaksesi tiedoston koneelle.</p>

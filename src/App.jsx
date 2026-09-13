@@ -49,7 +49,6 @@ function InspectorApp({ session, profile, logout }) {
   const [sites, setSites] = useState([])
   const [site, setSite] = useState('') // ihmisluettava nimi (observations.site)
   const [inspector, setInspector] = useState('')
-  const [rivi, setRivi] = useState('')
   const [obs, setObs] = useState([])
   const [mapData, setMapData] = useState(null)
   const [mapError, setMapError] = useState('')
@@ -80,9 +79,9 @@ function InspectorApp({ session, profile, logout }) {
   const syncTimer = useRef(null)
   const restoredRef = useRef(false)
   const obsRef = useRef(obs)
-  const metaRef = useRef({ site, inspector, rivi })
+  const metaRef = useRef({ site, inspector })
   useEffect(() => { obsRef.current = obs }, [obs])
-  useEffect(() => { metaRef.current = { site, inspector, rivi } }, [site, inspector, rivi])
+  useEffect(() => { metaRef.current = { site, inspector } }, [site, inspector])
 
   // Yrityksen työmaat DB:stä (korvaa vanhan kovakoodatun KNOWN_SITES-listan).
   // Kun ne latautuvat, valitaan oletukseksi ensimmäinen työmaa — paitsi jos
@@ -142,12 +141,14 @@ function InspectorApp({ session, profile, logout }) {
     syncTimer.current = setTimeout(() => setSyncMsg(''), 3000)
   }
 
-  async function saveObs(o, currentSite, currentInspector, currentRivi) {
+  async function saveObs(o, currentSite, currentInspector) {
     const data = {
       cat: o.cat, sev: o.sev, note: o.note, muu: o.muu,
       type: o.type || 'vika',
       pin_x: o.pin?.x ?? null, pin_y: o.pin?.y ?? null,
-      site: currentSite, inspector: currentInspector, rivi: currentRivi,
+      // Paikka on nyt OMA kenttä per havainto (o.rivi), ei enää koko
+      // raportille yhteinen arvo — ks. kortin "Paikka"-kenttä JSX:ssä.
+      site: currentSite, inspector: currentInspector, rivi: o.rivi || null,
       local_id: o.id,
       status: o.status || 'avoin',
       assigned_installer_id: o.assignedInstallerId ?? null,
@@ -194,8 +195,8 @@ function InspectorApp({ session, profile, logout }) {
   function retrySync() {
     obsRef.current.forEach(o => {
       if (!o.db_id) {
-        const { site: s, inspector: ins, rivi: r } = metaRef.current
-        saveObs(o, s, ins, r)
+        const { site: s, inspector: ins } = metaRef.current
+        saveObs(o, s, ins)
       }
     })
   }
@@ -212,7 +213,6 @@ function InspectorApp({ session, profile, logout }) {
           idCounter = Math.max(idCounter, ...draft.obs.map(o => o.id || 0))
           if (draft.site) setSite(draft.site)
           if (draft.inspector) setInspector(draft.inspector)
-          if (draft.rivi) setRivi(draft.rivi)
           if (draft.currentSiteId) setCurrentSiteId(draft.currentSiteId)
           showSync('↺ Luonnos palautettu')
         }
@@ -227,12 +227,12 @@ function InspectorApp({ session, profile, logout }) {
   useEffect(() => {
     if (!restoredRef.current) return
     try {
-      const toSave = { site, inspector, rivi, currentSiteId, obs: obs.map(({ _timer, ...rest }) => rest) }
+      const toSave = { site, inspector, currentSiteId, obs: obs.map(({ _timer, ...rest }) => rest) }
       localStorage.setItem(DRAFT_KEY, JSON.stringify(toSave))
     } catch {
       // Quota exceeded or storage unavailable — cloud sync still applies when back online
     }
-  }, [obs, site, inspector, rivi, currentSiteId])
+  }, [obs, site, inspector, currentSiteId])
 
   // Track connectivity and retry pending saves as soon as the connection is back
   useEffect(() => {
@@ -250,7 +250,11 @@ function InspectorApp({ session, profile, logout }) {
 
   function addObs() {
     const id = ++idCounter
-    setObs(prev => [...prev, { id, cat: '', sev: 'Huomio', note: '', muu: '', type: 'vika', photos: [], pin: null, db_id: null, createdAt: new Date().toISOString() }])
+    // Esitäytä paikka edellisen havainnon paikalla — kätevää kun useampi
+    // vika löytyy peräkkäin samasta kohdasta, mutta silti aina muokattavissa
+    // kortilla itsellään (ks. "Paikka"-kenttä alla).
+    const lastRivi = obs.length ? (obs[obs.length - 1].rivi || '') : ''
+    setObs(prev => [...prev, { id, cat: '', sev: 'Huomio', note: '', muu: '', rivi: lastRivi, type: 'vika', photos: [], pin: null, db_id: null, createdAt: new Date().toISOString() }])
   }
 
   // Vaihtaa havainnon "Vika"/"Läheltäpiti" -tyyppiä. Läheltäpiti-ilmoituksilla
@@ -263,8 +267,8 @@ function InspectorApp({ session, profile, logout }) {
     setObs(prev => prev.map(o => {
       if (o.id !== id) return o
       const updated = { ...o, type, cat: type === 'laheltapiti' ? 'Läheltäpiti' : '', muu: '' }
-      const { site: s, inspector: ins, rivi: r } = metaRef.current
-      saveObs(updated, s, ins, r)
+      const { site: s, inspector: ins } = metaRef.current
+      saveObs(updated, s, ins)
       return updated
     }))
   }
@@ -273,7 +277,6 @@ function InspectorApp({ session, profile, logout }) {
     if (obs.length > 0 && !window.confirm('Aloitetaanko uusi raportti? Nykyiset havainnot poistetaan tältä laitteelta (jo pilveen tallentuneet säilyvät Supabasessa ennallaan).')) return
     setObs([])
     setInspector('')
-    setRivi('')
     try { localStorage.removeItem(DRAFT_KEY) } catch {}
   }
 
@@ -296,7 +299,7 @@ function InspectorApp({ session, profile, logout }) {
     const installer = installers.find(i => i.id === assignInstallerId)
     const updated = obs.map(o => ({ ...o, assignedInstallerId: assignInstallerId, status: 'avoin', reportBatch }))
     setObs(updated)
-    await Promise.all(updated.map(o => saveObs(o, site, inspector, rivi)))
+    await Promise.all(updated.map(o => saveObs(o, site, inspector)))
 
     const res = await sendPushNotification({
       role: 'installer',
@@ -335,8 +338,8 @@ function InspectorApp({ session, profile, logout }) {
       updated._timer = setTimeout(() => {
         const latest = obsRef.current.find(x => x.id === id)
         if (latest) {
-          const { site: s, inspector: ins, rivi: r } = metaRef.current
-          saveObs(latest, s, ins, r)
+          const { site: s, inspector: ins } = metaRef.current
+          saveObs(latest, s, ins)
         }
       }, 1200)
       return updated
@@ -347,7 +350,7 @@ function InspectorApp({ session, profile, logout }) {
     setObs(prev => prev.map(o => {
       if (o.id !== id) return o
       const updated = { ...o, pin }
-      saveObs(updated, site, inspector, rivi)
+      saveObs(updated, site, inspector)
       return updated
     }))
   }
@@ -362,12 +365,12 @@ function InspectorApp({ session, profile, logout }) {
     if (quickAddId === o.id && o.pin) {
       const id = ++idCounter
       const clone = {
-        id, cat: o.cat, sev: o.sev, note: '', muu: o.muu, type: o.type || 'vika', photos: [],
+        id, cat: o.cat, sev: o.sev, note: '', muu: o.muu, rivi: o.rivi || '', type: o.type || 'vika', photos: [],
         pin, db_id: null, createdAt: new Date().toISOString(),
         clonedFrom: o.id, // pikalisäyksen aikana luotu — käytetään extraPins-listaan MapView'ssa
       }
       setObs(prev => [...prev, clone])
-      saveObs(clone, site, inspector, rivi)
+      saveObs(clone, site, inspector)
       setCollapsedIds(prev => { const next = new Set(prev); next.add(id); return next })
       setQuickAddCounts(prev => ({ ...prev, [o.id]: (prev[o.id] || 0) + 1 }))
     } else {
@@ -381,6 +384,14 @@ function InspectorApp({ session, profile, logout }) {
 
   function expandObs(id) {
     setCollapsedIds(prev => { const next = new Set(prev); next.delete(id); return next })
+  }
+
+  // "✓ Valmis" -painike täytetylle kortille: ei lähetä eikä poista mitään,
+  // pelkkä näkymän siistiminen — havainto pysyy täysin normaalisti mukana
+  // samassa erässä ja lähtee asentajalle kuten ennenkin kun painat
+  // "Lähetä asentajalle". Rivi voi aina avata takaisin "Avaa"-painikkeella.
+  function collapseObs(id) {
+    setCollapsedIds(prev => { const next = new Set(prev); next.add(id); return next })
   }
 
   function setMapView(id, view) {
@@ -457,7 +468,10 @@ function InspectorApp({ session, profile, logout }) {
     doc.text(dateStr, W - M, 12, { align: 'right' })
     y = 38
 
-    const meta = [[T.site, site || '–'], [T.inspector, inspector || '–'], [T.rivi, rivi || '–']]
+    // Paikka ("rivi") ei ole enää tässä yhteinen otsikkorivi — se näkyy
+    // jokaisen havainnon omalla rivillä alempana, koska paikka on nyt
+    // per-havainto-tieto (o.rivi), ei koko raportin yhteinen arvo.
+    const meta = [[T.site, site || '–'], [T.inspector, inspector || '–']]
     meta.forEach(([k, v]) => {
       doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(100, 100, 120); doc.text(k, M, y)
       doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(20, 20, 60); doc.text(v, M + 28, y)
@@ -520,8 +534,9 @@ function InspectorApp({ session, profile, logout }) {
           const timeStr = o.createdAt ? '  ' + new Date(o.createdAt).toLocaleTimeString(T.dateLocale, { hour: '2-digit', minute: '2-digit' }) : ''
           const rowLbl = rowLabelByItem.get(o)
           const rowStr = rowLbl ? `  (${T.row} ${rowLbl})` : ''
+          const paikkaStr = o.rivi ? `  ·  ${o.rivi}` : ''
           doc.setFont('helvetica', 'bold'); doc.setFontSize(10.5); doc.setTextColor(...sc)
-          doc.text(`${idx + 1}. ${sevLabel}${rowStr}${timeStr}`, M + 2, y)
+          doc.text(`${idx + 1}. ${sevLabel}${paikkaStr}${rowStr}${timeStr}`, M + 2, y)
           y += 5.5
           if (o.note) {
             doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(60, 60, 60)
@@ -580,9 +595,12 @@ function InspectorApp({ session, profile, logout }) {
       doc.text(sevLabel, W - M - 4, y + 5.7, { align: 'right' })
       y += 11
 
-      if (o.createdAt) {
+      if (o.createdAt || o.rivi) {
         doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(140, 140, 140)
-        doc.text(new Date(o.createdAt).toLocaleTimeString(T.dateLocale, { hour: '2-digit', minute: '2-digit' }), M + 2, y)
+        const bits = []
+        if (o.rivi) bits.push(o.rivi)
+        if (o.createdAt) bits.push(new Date(o.createdAt).toLocaleTimeString(T.dateLocale, { hour: '2-digit', minute: '2-digit' }))
+        doc.text(bits.join('   ·   '), M + 2, y)
         y += 4.5
       }
 
@@ -711,20 +729,18 @@ function InspectorApp({ session, profile, logout }) {
     setPdfBlob(blob); setPdfName(fn); setPdfDownloaded(false); setPdfMode(true)
   }
 
-  const shareSupported = typeof navigator !== 'undefined' && !!navigator.share && !!navigator.canShare
-
+  // HUOM: aiemmin OS:n jakovalikko (navigator.share) avattiin aina kun
+  // laite/selain tuki sitä — vaatii ylimääräisen "Tallenna tiedostoihin"
+  // -välivaiheen ennen kuin PDF on oikeasti laitteella. Ladataan nyt AINA
+  // suoraan laitteen Lataukset-kansioon, jotta sen voi liittää heti mihin
+  // tahansa itse (samat perusteet kuin Diary.jsx:n Päiväkirja-PDF:ssä).
   async function sharePDF() {
     if (!pdfBlob) return
-    const file = new File([pdfBlob], pdfName, { type: 'application/pdf' })
-    if (navigator.canShare?.({ files: [file] })) {
-      try { await navigator.share({ files: [file], title: pdfName }) } catch {}
-    } else {
-      const url = URL.createObjectURL(pdfBlob)
-      const a = document.createElement('a'); a.href = url; a.download = pdfName
-      document.body.appendChild(a); a.click(); document.body.removeChild(a)
-      setTimeout(() => URL.revokeObjectURL(url), 3000)
-      setPdfDownloaded(true)
-    }
+    const url = URL.createObjectURL(pdfBlob)
+    const a = document.createElement('a'); a.href = url; a.download = pdfName
+    document.body.appendChild(a); a.click(); document.body.removeChild(a)
+    setTimeout(() => URL.revokeObjectURL(url), 3000)
+    setPdfDownloaded(true)
   }
 
   const sevColor = { Kriittinen: '#d63030', Huomio: '#d07800', Info: '#1a8a50' }
@@ -797,10 +813,12 @@ function InspectorApp({ session, profile, logout }) {
       <div style={{ flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch', paddingBottom: 90 }}>
 
         {/* Meta — työmaa valitaan nyt yhteisestä valitsimesta yllä (tab-
-            switcherin päällä), ei enää tässä erikseen. */}
+            switcherin päällä), ei enää tässä erikseen. Paikka ei ole enää
+            tässä — se on jokaisen havaintokortin omassa "Paikka"-kentässä,
+            koska eri havainnot yhdellä työmaakierroksella osuvat usein eri
+            paikkoihin. */}
         <div style={{ padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 8, background: '#fff', borderBottom: '1px solid #d0d5e8' }}>
           <input style={inputStyle} placeholder="Työnjohtaja" value={inspector} onChange={e => setInspector(e.target.value)} />
-          <input style={inputStyle} placeholder="Paikka (esim. rivi A7-45, huone 204, 3. kerros)" value={rivi} onChange={e => setRivi(e.target.value)} />
           <button onClick={newReport} style={{ alignSelf: 'flex-end', background: 'none', border: 'none', fontSize: 11, color: '#6670a0', padding: '2px 0' }}>
             🔄 Uusi raportti
           </button>
@@ -846,8 +864,8 @@ function InspectorApp({ session, profile, logout }) {
               return (
                 <div key={o.id} style={{ background: '#fff', border: '1px solid #d0d5e8', borderRadius: 10, padding: '9px 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-                    <span style={{ fontSize: 10, fontWeight: 700, padding: '3px 7px', borderRadius: 20, background: sevBg[o.sev], color: sevColor[o.sev], flexShrink: 0 }}>{o.sev}</span>
-                    <span style={{ fontSize: 13, fontWeight: 600, color: '#222', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{o.cat}</span>
+                    <span style={{ fontSize: 10, fontWeight: 700, padding: '3px 7px', borderRadius: 20, background: sevBg[o.sev], color: sevColor[o.sev], flexShrink: 0 }}>✓ {o.sev}</span>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: '#222', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{o.cat}{o.rivi ? ` · ${o.rivi}` : ''}</span>
                   </div>
                   <div style={{ display: 'flex', gap: 10, flexShrink: 0, alignItems: 'center' }}>
                     <button onClick={() => expandObs(o.id)} style={{ background: 'none', border: 'none', color: '#1560c4', fontSize: 12, fontWeight: 700 }}>Avaa</button>
@@ -873,6 +891,7 @@ function InspectorApp({ session, profile, logout }) {
                     </span>
                   )}
                   <span style={{ fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 20, background: sevBg[o.sev], color: sevColor[o.sev] }}>{o.sev}</span>
+                  <button onClick={() => collapseObs(o.id)} title="Merkitse valmiiksi — piilottaa kortin näkymästä, pysyy mukana erässä" style={{ background: 'none', border: 'none', color: '#1a8a50', fontSize: 12, fontWeight: 700 }}>✓ Valmis</button>
                   <button onClick={() => removeObs(o.id)} style={{ background: 'none', border: 'none', color: '#6670a0', fontSize: 18 }}>🗑</button>
                 </div>
               </div>
@@ -895,6 +914,16 @@ function InspectorApp({ session, profile, logout }) {
                       )
                     })}
                   </div>
+                </div>
+
+                {/* Paikka — OMA kenttä JOKAISELLE havainnolle (ei enää yhteinen
+                    koko raportille), koska työmaan läpikäynnissä eri havainnot
+                    osuvat eri huoneisiin/kerroksiin/alueisiin. Esitäytetään
+                    edellisen havainnon paikalla — usein sama, jos useita
+                    vikoja samasta kohdasta peräkkäin — mutta aina muokattavissa. */}
+                <div>
+                  <div style={labelStyle}>Paikka</div>
+                  <input style={inputStyle} placeholder="esim. rivi A7-45, huone 204, 3. kerros" value={o.rivi || ''} onChange={e => updateObs(o.id, 'rivi', e.target.value)} />
                 </div>
 
                 {/* Category — vain vika-tyyppisillä havainnoilla. Vapaa tekstikenttä,
@@ -1064,17 +1093,12 @@ function InspectorApp({ session, profile, logout }) {
             <button onClick={() => setPdfMode(false)} style={{ background: 'rgba(255,255,255,0.2)', border: 'none', color: '#fff', width: 32, height: 32, borderRadius: '50%', fontSize: 18 }}>✕</button>
             <span style={{ fontSize: 15, fontWeight: 700, color: '#fff' }}>PDF valmis</span>
             <button onClick={sharePDF} style={{ background: '#f5a800', border: 'none', color: '#1560c4', fontSize: 13, fontWeight: 700, padding: '8px 16px', borderRadius: 8 }}>
-              {shareSupported ? '⬆ Jaa' : '⬇ Lataa PDF'}
+              ⬇ Lataa PDF
             </button>
           </div>
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 20, padding: 32 }}>
             <div style={{ fontSize: 64 }}>{pdfDownloaded ? '✅' : '📄'}</div>
-            {shareSupported ? (
-              <p style={{ fontSize: 14, color: '#6670a0', textAlign: 'center', lineHeight: 1.6 }}>
-                Paina <strong style={{ color: '#0d1a6e' }}>Jaa ⬆</strong> avataksesi jakovalikon.<br />
-                Valitse <strong style={{ color: '#0d1a6e' }}>WhatsApp</strong> tai <strong style={{ color: '#0d1a6e' }}>Tallenna tiedostot</strong>.
-              </p>
-            ) : pdfDownloaded ? (
+            {pdfDownloaded ? (
               <p style={{ fontSize: 14, color: '#1a8a50', textAlign: 'center', lineHeight: 1.6, fontWeight: 600 }}>
                 PDF ladattu koneen Lataukset-kansioon.<br />
                 <span style={{ color: '#6670a0', fontWeight: 400 }}>({pdfName})</span>
