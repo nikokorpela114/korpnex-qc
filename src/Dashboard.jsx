@@ -710,7 +710,7 @@ function DashboardInner({ session, profile, logout }) {
                     </label>
                     <div style={{ maxHeight: 440, overflowY: 'auto' }}>
                       {g.items.map(o => (
-                        <ObsRow key={o.id} o={o} fmtTime={fmtTime} selected={selected.has(o.id)} onToggle={() => toggleSelect(o.id)} />
+                        <ObsRow key={o.id} o={o} fmtTime={fmtTime} selected={selected.has(o.id)} onToggle={() => toggleSelect(o.id)} onOpenPhoto={setLightboxSrc} />
                       ))}
                     </div>
                   </div>
@@ -797,6 +797,7 @@ function DashboardInner({ session, profile, logout }) {
                   <th style={thStyle}>Urakoitsija</th>
                   <th style={thStyle}>Ilmoittaja</th>
                   <th style={thStyle}>Aika</th>
+                  <th style={thStyle}>Kuva</th>
                 </tr>
               </thead>
               <tbody>
@@ -809,10 +810,22 @@ function DashboardInner({ session, profile, logout }) {
                     <td style={tdStyle}>{contractorById.get(contractorIdOf(o))?.name || '—'}</td>
                     <td style={tdStyle}>{o.inspector || '—'}</td>
                     <td style={tdStyle}>{fmtTime(o.created_at)}</td>
+                    <td style={tdStyle}>
+                      {o.photo ? (
+                        <img
+                          src={o.photo}
+                          alt="Kuva"
+                          onClick={() => setLightboxSrc(o.photo)}
+                          style={{ width: 44, height: 44, objectFit: 'cover', borderRadius: 6, border: '1px solid #d0d5e8', cursor: 'pointer' }}
+                        />
+                      ) : (
+                        <span style={{ color: '#c3c8dc', fontSize: 12 }}>—</span>
+                      )}
+                    </td>
                   </tr>
                 ))}
                 {nearMissSorted.length === 0 && (
-                  <tr><td colSpan={7} style={{ ...tdStyle, textAlign: 'center', color: '#9aa2c0', padding: 40 }}>Ei läheltäpiti-ilmoituksia</td></tr>
+                  <tr><td colSpan={8} style={{ ...tdStyle, textAlign: 'center', color: '#9aa2c0', padding: 40 }}>Ei läheltäpiti-ilmoituksia</td></tr>
                 )}
               </tbody>
             </table>
@@ -927,21 +940,21 @@ function DashboardInner({ session, profile, logout }) {
                     <div>
                       <div style={{ fontSize: 12, fontWeight: 700, color: '#1560c4', textTransform: 'uppercase', marginBottom: 8 }}>Avoimet viat ({cOpen.length})</div>
                       <div style={{ maxHeight: 320, overflowY: 'auto', border: '1px solid #eef0f7', borderRadius: 8 }}>
-                        {cOpen.map(o => <ObsRow key={o.id} o={o} fmtTime={fmtTime} selected={false} onToggle={() => {}} />)}
+                        {cOpen.map(o => <ObsRow key={o.id} o={o} fmtTime={fmtTime} selected={false} onToggle={() => {}} onOpenPhoto={setLightboxSrc} />)}
                         {cOpen.length === 0 && <div style={{ padding: 16, fontSize: 12.5, color: '#9aa2c0' }}>Ei avoimia vikoja</div>}
                       </div>
                     </div>
                     <div>
                       <div style={{ fontSize: 12, fontWeight: 700, color: '#1a8a50', textTransform: 'uppercase', marginBottom: 8 }}>Korjatut viat ({cFixed.length})</div>
                       <div style={{ maxHeight: 320, overflowY: 'auto', border: '1px solid #eef0f7', borderRadius: 8 }}>
-                        {cFixed.map(o => <ObsRow key={o.id} o={o} fmtTime={fmtTime} selected={false} onToggle={() => {}} />)}
+                        {cFixed.map(o => <ObsRow key={o.id} o={o} fmtTime={fmtTime} selected={false} onToggle={() => {}} onOpenPhoto={setLightboxSrc} />)}
                         {cFixed.length === 0 && <div style={{ padding: 16, fontSize: 12.5, color: '#9aa2c0' }}>Ei korjattuja vikoja</div>}
                       </div>
                     </div>
                     <div>
                       <div style={{ fontSize: 12, fontWeight: 700, color: '#a06800', textTransform: 'uppercase', marginBottom: 8 }}>Läheltäpiti ({cNearMiss.length})</div>
                       <div style={{ maxHeight: 320, overflowY: 'auto', border: '1px solid #eef0f7', borderRadius: 8 }}>
-                        {cNearMiss.map(o => <ObsRow key={o.id} o={o} fmtTime={fmtTime} selected={false} onToggle={() => {}} />)}
+                        {cNearMiss.map(o => <ObsRow key={o.id} o={o} fmtTime={fmtTime} selected={false} onToggle={() => {}} onOpenPhoto={setLightboxSrc} />)}
                         {cNearMiss.length === 0 && <div style={{ padding: 16, fontSize: 12.5, color: '#9aa2c0' }}>Ei läheltäpiti-ilmoituksia</div>}
                       </div>
                     </div>
@@ -1215,10 +1228,18 @@ function DashboardInner({ session, profile, logout }) {
   )
 }
 
-function ObsRow({ o, fmtTime, selected, onToggle }) {
+function ObsRow({ o, fmtTime, selected, onToggle, onOpenPhoto }) {
   return (
     <div style={{ padding: '10px 16px', borderBottom: '1px solid #f0f1f7', display: 'flex', gap: 10, alignItems: 'flex-start', background: selected ? '#f3f5ff' : 'transparent' }}>
       <input type="checkbox" checked={selected} onChange={onToggle} style={{ marginTop: 3 }} />
+      {o.photo && (
+        <img
+          src={o.photo}
+          alt="Kuva"
+          onClick={() => onOpenPhoto && onOpenPhoto(o.photo)}
+          style={{ width: 40, height: 40, objectFit: 'cover', borderRadius: 6, border: '1px solid #d0d5e8', cursor: onOpenPhoto ? 'pointer' : 'default', flexShrink: 0 }}
+        />
+      )}
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'flex-start' }}>
           <span style={{ fontSize: 13, fontWeight: 600, color: '#222' }}>{o.cat}</span>
