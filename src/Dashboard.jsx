@@ -65,6 +65,7 @@ function DashboardInner({ session, profile, logout }) {
   // kentät kuin Käyttäjät-välilehdellä, mutta urakoitsija on tässä valmiiksi
   // lukittu kyseiseen korttiin.
   const [addEmpContractorId, setAddEmpContractorId] = useState('')
+  const [addEmpName, setAddEmpName] = useState('')
   const [addEmpEmail, setAddEmpEmail] = useState('')
   const [addEmpPassword, setAddEmpPassword] = useState('')
   const [addEmpRole, setAddEmpRole] = useState('asentaja')
@@ -75,10 +76,19 @@ function DashboardInner({ session, profile, logout }) {
   const [companyUsers, setCompanyUsers] = useState([])
   const [usersLoading, setUsersLoading] = useState(false)
   const [userErr, setUserErr] = useState('')
+  const [newUserName, setNewUserName] = useState('')
   const [newUserEmail, setNewUserEmail] = useState('')
   const [newUserPassword, setNewUserPassword] = useState('')
   const [newUserRole, setNewUserRole] = useState('asentaja')
   const [newUserContractorId, setNewUserContractorId] = useState('')
+  // Olemassa olevan käyttäjän nimen/roolin muokkaus (esim. anna työnjohtajalle
+  // Valvomo-pääsy vaihtamalla rooli admin:ksi) — sama rivi vaihtuu editointi-
+  // tilaan, kun "✏️ Muokkaa" painetaan.
+  const [editUserId, setEditUserId] = useState('')
+  const [editUserName, setEditUserName] = useState('')
+  const [editUserRole, setEditUserRole] = useState('')
+  const [editUserErr, setEditUserErr] = useState('')
+  const [editUserBusy, setEditUserBusy] = useState(false)
 
   const load = useCallback(async () => {
     const [
@@ -290,9 +300,26 @@ function DashboardInner({ session, profile, logout }) {
     const emailVal = newUserEmail.trim(), pwVal = newUserPassword
     if (!emailVal || pwVal.length < 6) { setUserErr('Anna sähköposti ja vähintään 6 merkin salasana.'); return }
     setUserErr('')
-    const { data, error } = await sb.functions.invoke('manage-company-users', { body: { action: 'create', email: emailVal, password: pwVal, role: newUserRole, contractor_id: newUserContractorId || null } })
+    const { data, error } = await sb.functions.invoke('manage-company-users', { body: { action: 'create', name: newUserName.trim() || null, email: emailVal, password: pwVal, role: newUserRole, contractor_id: newUserContractorId || null } })
     if (error || data?.error) { setUserErr(await describeFnError(error, data)); return }
-    setNewUserEmail(''); setNewUserPassword(''); setNewUserContractorId('')
+    setNewUserName(''); setNewUserEmail(''); setNewUserPassword(''); setNewUserContractorId('')
+    loadUsers(); load()
+  }
+
+  // --- Käyttäjän nimen/roolin muokkaus jälkikäteen ---
+  function startEditUser(u) {
+    setEditUserId(u.id); setEditUserName(u.name || ''); setEditUserRole(u.role); setEditUserErr('')
+  }
+  function cancelEditUser() {
+    setEditUserId(''); setEditUserErr('')
+  }
+  async function saveEditUser() {
+    if (!editUserId) return
+    setEditUserErr(''); setEditUserBusy(true)
+    const { data, error } = await sb.functions.invoke('manage-company-users', { body: { action: 'update', user_id: editUserId, name: editUserName.trim() || null, role: editUserRole } })
+    setEditUserBusy(false)
+    if (error || data?.error) { setEditUserErr(await describeFnError(error, data)); return }
+    setEditUserId('')
     loadUsers(); load()
   }
 
@@ -306,10 +333,10 @@ function DashboardInner({ session, profile, logout }) {
     const emailVal = addEmpEmail.trim(), pwVal = addEmpPassword
     if (!emailVal || pwVal.length < 6) { setAddEmpErr('Anna sähköposti ja vähintään 6 merkin salasana.'); return }
     setAddEmpErr(''); setAddEmpBusy(true)
-    const { data, error } = await sb.functions.invoke('manage-company-users', { body: { action: 'create', email: emailVal, password: pwVal, role: addEmpRole, contractor_id: contractorId } })
+    const { data, error } = await sb.functions.invoke('manage-company-users', { body: { action: 'create', name: addEmpName.trim() || null, email: emailVal, password: pwVal, role: addEmpRole, contractor_id: contractorId } })
     setAddEmpBusy(false)
     if (error || data?.error) { setAddEmpErr(await describeFnError(error, data)); return }
-    setAddEmpEmail(''); setAddEmpPassword(''); setAddEmpRole('asentaja'); setAddEmpContractorId('')
+    setAddEmpName(''); setAddEmpEmail(''); setAddEmpPassword(''); setAddEmpRole('asentaja'); setAddEmpContractorId('')
     loadUsers(); load()
   }
   async function deleteUser(u) {
@@ -611,7 +638,7 @@ function DashboardInner({ session, profile, logout }) {
                           const opening = addEmpContractorId !== c.id
                           setAddEmpContractorId(opening ? c.id : '')
                           setAddEmpErr('')
-                          if (opening) { setAddEmpEmail(''); setAddEmpPassword(''); setAddEmpRole('asentaja') }
+                          if (opening) { setAddEmpName(''); setAddEmpEmail(''); setAddEmpPassword(''); setAddEmpRole('asentaja') }
                         }}
                         style={{ width: '100%', padding: 9, borderRadius: 8, border: '1px dashed #b0b8d8', background: 'none', fontSize: 12.5, fontWeight: 700, cursor: 'pointer', color: '#1560c4' }}
                       >
@@ -619,6 +646,11 @@ function DashboardInner({ session, profile, logout }) {
                       </button>
                       {addEmpContractorId === c.id && (
                         <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid #eef0f7', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                          <input
+                            type="text" placeholder="Nimi (esim. Matti Meikäläinen)" value={addEmpName}
+                            onChange={e => setAddEmpName(e.target.value)}
+                            style={{ ...selectStyle, padding: '7px 10px', fontSize: 12.5 }}
+                          />
                           <input
                             type="email" placeholder="Sähköposti" value={addEmpEmail}
                             onChange={e => setAddEmpEmail(e.target.value)}
@@ -753,6 +785,12 @@ function DashboardInner({ session, profile, logout }) {
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <input
+                  type="text" placeholder="Nimi (esim. Matti Meikäläinen)"
+                  value={newUserName} onChange={e => setNewUserName(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && createUser()}
+                  style={selectStyle}
+                />
+                <input
                   type="email" placeholder="Sähköposti"
                   value={newUserEmail} onChange={e => setNewUserEmail(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && createUser()}
@@ -780,7 +818,7 @@ function DashboardInner({ session, profile, logout }) {
                   Luo käyttäjä
                 </button>
                 <div style={{ fontSize: 11, color: '#9aa2c0' }}>
-                  Käyttäjä voi itse vaihtaa tämän salasanan kirjautumissivun "Unohtuiko salasana?" -linkistä. Asentaja-tilit ilmestyvät Urakoitsijat-välilehden asentajalistaan välittömästi, ei vasta ensimmäisen kirjautumisen jälkeen.
+                  Nimi näkyy tässä listassa sähköpostin sijaan, jotta tiedät kuka on kuka — jätä tyhjäksi jos haluat käyttää sähköpostia nimenä. Käyttäjä voi itse vaihtaa salasanan kirjautumissivun "Unohtuiko salasana?" -linkistä. Asentaja-tilit ilmestyvät Urakoitsijat-välilehden asentajalistaan välittömästi, ei vasta ensimmäisen kirjautumisen jälkeen.
                 </div>
               </div>
             </div>
@@ -798,19 +836,70 @@ function DashboardInner({ session, profile, logout }) {
                   Ei käyttäjiä listattavissa. Jos tämä on ensimmäinen kerta, varmista että manage-company-users-funktio on deployattu Supabaseen.
                 </div>
               )}
-              {companyUsers.map(u => (
-                <div key={u.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '1px solid #f4f5fa', gap: 10 }}>
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ fontSize: 14, fontWeight: 600 }}>{u.email}{u.id === session?.user?.id ? ' (sinä)' : ''}</div>
-                    <div style={{ fontSize: 11, color: '#9aa2c0' }}>
-                      {ROLE_LABEL[u.role] || u.role} · luotu {fmtTime(u.created_at)}
-                    </div>
+              {companyUsers.map(u => {
+                const isMe = u.id === session?.user?.id
+                const isEditing = editUserId === u.id
+                const displayName = u.name && u.name !== u.email ? u.name : null
+                return (
+                  <div key={u.id} style={{ padding: '10px 0', borderBottom: '1px solid #f4f5fa' }}>
+                    {!isEditing ? (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontSize: 14, fontWeight: 600 }}>
+                            {displayName || u.email}{isMe ? ' (sinä)' : ''}
+                          </div>
+                          {displayName && <div style={{ fontSize: 11.5, color: '#6670a0' }}>{u.email}</div>}
+                          <div style={{ fontSize: 11, color: '#9aa2c0' }}>
+                            {ROLE_LABEL[u.role] || u.role} · luotu {fmtTime(u.created_at)}
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+                          <button onClick={() => startEditUser(u)} title="Muokkaa nimeä/roolia" style={{ background: 'none', border: 'none', color: '#1560c4', fontSize: 13, cursor: 'pointer', padding: '2px 4px' }}>✏️</button>
+                          {!isMe && (
+                            <button onClick={() => deleteUser(u)} title="Poista käyttäjä" style={{ background: 'none', border: 'none', color: '#b02828', fontSize: 15, cursor: 'pointer', padding: '2px 4px' }}>🗑️</button>
+                          )}
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        <div style={{ fontSize: 11.5, color: '#9aa2c0' }}>{u.email}{isMe ? ' (sinä)' : ''}</div>
+                        <input
+                          type="text" placeholder="Nimi" value={editUserName}
+                          onChange={e => setEditUserName(e.target.value)}
+                          style={{ ...selectStyle, padding: '6px 10px', fontSize: 12.5 }}
+                        />
+                        <select
+                          value={editUserRole} onChange={e => setEditUserRole(e.target.value)}
+                          disabled={isMe}
+                          style={{ ...selectStyle, padding: '6px 10px', fontSize: 12.5, opacity: isMe ? 0.6 : 1 }}
+                        >
+                          <option value="asentaja">Asentaja</option>
+                          <option value="tarkastaja">Työnjohtaja</option>
+                          <option value="admin">Ylläpitäjä (Valvomo)</option>
+                        </select>
+                        {isMe && (
+                          <div style={{ fontSize: 11, color: '#9aa2c0' }}>Et voi vaihtaa omaa rooliasi täältä.</div>
+                        )}
+                        {editUserErr && <div style={{ color: '#d63030', fontSize: 12 }}>{editUserErr}</div>}
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          <button
+                            onClick={saveEditUser} disabled={editUserBusy}
+                            style={{ background: '#1560c4', color: '#fff', border: 'none', borderRadius: 8, padding: '6px 12px', fontSize: 12.5, fontWeight: 700, cursor: 'pointer', opacity: editUserBusy ? 0.6 : 1 }}
+                          >
+                            {editUserBusy ? 'Tallennetaan…' : '✓ Tallenna'}
+                          </button>
+                          <button
+                            onClick={cancelEditUser}
+                            style={{ background: 'none', border: '1px solid #d0d5e8', color: '#6670a0', borderRadius: 8, padding: '6px 12px', fontSize: 12.5, cursor: 'pointer' }}
+                          >
+                            Peruuta
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
-                  {u.id !== session?.user?.id && (
-                    <button onClick={() => deleteUser(u)} title="Poista käyttäjä" style={{ background: 'none', border: 'none', color: '#b02828', fontSize: 15, cursor: 'pointer', padding: '2px 4px' }}>🗑️</button>
-                  )}
-                </div>
-              ))}
+                )
+              })}
             </div>
           </div>
         )}
