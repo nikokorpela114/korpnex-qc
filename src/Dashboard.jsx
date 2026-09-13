@@ -402,7 +402,7 @@ function DashboardInner({ session, profile, logout }) {
             {sites.map(s => <option key={s.id} value={s.label}>{s.label}</option>)}
           </select>
           <input
-            placeholder="Hae (vikatyyppi, rivi, työnjohtaja)…"
+            placeholder="Hae (vikatyyppi, paikka, työnjohtaja)…"
             value={search}
             onChange={e => setSearch(e.target.value)}
             style={{ ...selectStyle, flex: 1, minWidth: 220 }}
@@ -477,7 +477,7 @@ function DashboardInner({ session, profile, logout }) {
                   </th>
                   <th style={thStyle}>Vika</th>
                   <th style={thStyle}>Vakavuus</th>
-                  <th style={thStyle}>Työmaa / rivi</th>
+                  <th style={thStyle}>Työmaa / paikka</th>
                   <th style={thStyle}>Korjaaja</th>
                   <th style={thStyle}>Havaittu</th>
                   <th style={thStyle}>Korjattu</th>
@@ -506,7 +506,7 @@ function DashboardInner({ session, profile, logout }) {
                   </th>
                   <th style={thStyle}>Vika</th>
                   <th style={thStyle}>Vakavuus</th>
-                  <th style={thStyle}>Työmaa / rivi</th>
+                  <th style={thStyle}>Työmaa / paikka</th>
                   <th style={thStyle}>Tila</th>
                   <th style={thStyle}>Piilotettu</th>
                 </tr>
@@ -540,7 +540,7 @@ function DashboardInner({ session, profile, logout }) {
                   </th>
                   <th style={thStyle}>Kuvaus</th>
                   <th style={thStyle}>Vakavuus</th>
-                  <th style={thStyle}>Työmaa / rivi</th>
+                  <th style={thStyle}>Työmaa / paikka</th>
                   <th style={thStyle}>Urakoitsija</th>
                   <th style={thStyle}>Ilmoittaja</th>
                   <th style={thStyle}>Aika</th>

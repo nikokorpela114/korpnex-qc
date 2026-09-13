@@ -50,11 +50,11 @@ export const SEV_EN = { Kriittinen: 'Critical', Huomio: 'Attention', Info: 'Info
 
 export const PDF_STR = {
   fi: {
-    title: 'Laadunvalvontaraportti', site: 'Työmaa', inspector: 'Tarkastaja', rivi: 'Rivi / alue',
+    title: 'Laadunvalvontaraportti', site: 'Työmaa', inspector: 'Työnjohtaja', rivi: 'Paikka',
     location: 'Sijainti kartalla:', row: 'rivi', other: 'Muu', footer: 'QC-raportti', dateLocale: 'fi-FI',
   },
   en: {
-    title: 'Quality Control Report', site: 'Site', inspector: 'Inspector', rivi: 'Row / area',
+    title: 'Quality Control Report', site: 'Site', inspector: 'Inspector', rivi: 'Place',
     location: 'Location on map:', row: 'row', other: 'Other', footer: 'QC Report', dateLocale: 'en-GB',
   },
 }

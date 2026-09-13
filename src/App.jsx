@@ -800,7 +800,7 @@ function InspectorApp({ session, profile, logout }) {
             switcherin päällä), ei enää tässä erikseen. */}
         <div style={{ padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 8, background: '#fff', borderBottom: '1px solid #d0d5e8' }}>
           <input style={inputStyle} placeholder="Työnjohtaja" value={inspector} onChange={e => setInspector(e.target.value)} />
-          <input style={inputStyle} placeholder="Rivi / alue (esim. A7-45)" value={rivi} onChange={e => setRivi(e.target.value)} />
+          <input style={inputStyle} placeholder="Paikka (esim. rivi A7-45, huone 204, 3. kerros)" value={rivi} onChange={e => setRivi(e.target.value)} />
           <button onClick={newReport} style={{ alignSelf: 'flex-end', background: 'none', border: 'none', fontSize: 11, color: '#6670a0', padding: '2px 0' }}>
             🔄 Uusi raportti
           </button>
