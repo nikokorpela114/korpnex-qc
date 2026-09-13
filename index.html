@@ -5,12 +5,30 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="Korpnex QC">
+  <meta name="apple-mobile-web-app-title" content="Korpnex Työnjohto" id="apple-title-meta">
   <meta name="theme-color" content="#070b17">
   <link rel="icon" type="image/png" href="/favicon.png">
   <link rel="apple-touch-icon" href="/apple-touch-icon.png">
-  <link rel="manifest" href="/manifest.json">
-  <title>Korpnex QC</title>
+  <!--
+    HUOM (korjattu bugi — "Lisää Koti-valikkoon" avasi aina Työnjohto-appin):
+    Kaikki kolme näkymää (Valvomo/Työnjohto/Asentaja) ovat samaa sivustoa,
+    eroteltuna vain URL:n query-parametrilla (?valvomo / ?asentaja). Tämä
+    <link rel="manifest">, id="app-manifest", oli KIINTEÄ ja osoitti aina
+    manifestiin jonka start_url on "/" (pelkkä Työnjohto) — nykyaikainen iOS
+    Safari lukee "Lisää Koti-valikkoon" -kuvakkeen kohteen JA nimen tästä
+    manifestista, EI siitä URL:sta jolla oikeasti seisottiin, jos manifest on
+    linkitetty. Siksi Valvomon/Asentajan kotivalikko-kuvake avasi aina
+    Työnjohdon, riippumatta siitä miltä sivulta "Lisää Koti-valikkoon"
+    painettiin. Korjattu: src/main.jsx vaihtaa tämän linkin href:n (ja
+    apple-mobile-web-app-title-metatagin sisällön yllä) OIKEAAN,
+    näkymäkohtaiseen manifestiin (manifest-valvomo.json / manifest-asentaja.json
+    / manifest-tyonjohto.json) heti sovelluksen käynnistyessä, ennen kuin
+    käyttäjä ehtii painaa "Lisää Koti-valikkoon" — jokainen näkymä saa nyt
+    oman, oikein toimivan pikakuvakkeen JA oman nimensä (Korpnex Työnjohto /
+    Korpnex Valvomo / Korpnex Asentaja) kotivalikossa.
+  -->
+  <link rel="manifest" href="/manifest-tyonjohto.json" id="app-manifest">
+  <title>Korpnex Työnjohto</title>
 </head>
 <body>
   <div id="root"></div>
