@@ -15,7 +15,7 @@ import { ELEMENT_W_M, ELEMENT_ROW_DEPTH_M, CAT_EN, SEV_EN, PDF_STR, findPinRow, 
 // alla). Vanhat, jo tallennetut havainnot säilyttävät alkuperäisen
 // kategoriatekstinsä ennallaan.
 let idCounter = 0
-const DRAFT_KEY = 'korpnex_qc_draft_v1'
+const DRAFT_KEY_PREFIX = 'korpnex_qc_draft_v1_' // + auth user id — ks. HUOM alla
 
 export default function App() {
   // ?asentaja avaa karsitun asentajanäkymän tämän saman appin sisällä —
@@ -45,6 +45,15 @@ export default function App() {
 
 function InspectorApp({ session, profile, logout }) {
   const companyId = profile.company_id
+  // HUOM (per-käyttäjä paikallinen luonnos): tämä avain oli aiemmin
+  // yhteinen KAIKILLE tämän selaimen käyttäjille (const DRAFT_KEY = kiinteä
+  // teksti) — jos samalla laitteella/selaimella kirjautui toinen työnjohtaja
+  // (esim. testitilien uudelleenluonnin yhteydessä), hänelle ilmestyi
+  // edellisen käyttäjän kesken jäänyt vikalista, ja lähetetyt havainnot
+  // näyttivät jäävän ikuisesti näkymään koska luonnos ei tyhjentynyt eikä
+  // ollut sidottu keneenkään. Sidottuna auth-käyttäjän id:hen jokainen
+  // työnjohtaja näkee vain OMAN, oman laitteensa luonnoksensa.
+  const draftKey = DRAFT_KEY_PREFIX + session.user.id
   const [mainTab, setMainTab] = useState('vika') // 'vika' | 'paivakirja'
   const [sites, setSites] = useState([])
   const [site, setSite] = useState('') // ihmisluettava nimi (observations.site)
@@ -205,7 +214,7 @@ function InspectorApp({ session, profile, logout }) {
   // spent fully offline) as soon as the app opens.
   useEffect(() => {
     try {
-      const raw = localStorage.getItem(DRAFT_KEY)
+      const raw = localStorage.getItem(draftKey)
       if (raw) {
         const draft = JSON.parse(raw)
         if (draft.obs?.length) {
@@ -219,7 +228,7 @@ function InspectorApp({ session, profile, logout }) {
       }
     } catch {}
     restoredRef.current = true
-  }, [])
+  }, [draftKey])
 
   // Keep a local copy of the whole draft on every change — this is the real
   // safety net. It works regardless of network status, so nothing is lost if
@@ -228,11 +237,11 @@ function InspectorApp({ session, profile, logout }) {
     if (!restoredRef.current) return
     try {
       const toSave = { site, inspector, currentSiteId, obs: obs.map(({ _timer, ...rest }) => rest) }
-      localStorage.setItem(DRAFT_KEY, JSON.stringify(toSave))
+      localStorage.setItem(draftKey, JSON.stringify(toSave))
     } catch {
       // Quota exceeded or storage unavailable — cloud sync still applies when back online
     }
-  }, [obs, site, inspector, currentSiteId])
+  }, [obs, site, inspector, currentSiteId, draftKey])
 
   // Track connectivity and retry pending saves as soon as the connection is back
   useEffect(() => {
@@ -277,7 +286,7 @@ function InspectorApp({ session, profile, logout }) {
     if (obs.length > 0 && !window.confirm('Aloitetaanko uusi raportti? Nykyiset havainnot poistetaan tältä laitteelta (jo pilveen tallentuneet säilyvät Supabasessa ennallaan).')) return
     setObs([])
     setInspector('')
-    try { localStorage.removeItem(DRAFT_KEY) } catch {}
+    try { localStorage.removeItem(draftKey) } catch {}
   }
 
   // installers tulevat automaattisesti RLS:n rajaamina omasta yrityksestä —
@@ -288,18 +297,57 @@ function InspectorApp({ session, profile, logout }) {
     sb.from('installers').select('*').order('name').then(({ data }) => { if (data) setInstallers(data) })
   }, [])
 
+  // Yrityksen asentajalista päivitetään aina kun lähetyspaneeli avataan —
+  // sama korjaus kuin assignAndNotifyssa (ks. sen kommentti), tässä vain
+  // pitää pudotusvalikon LISTAN tuoreena eikä vain itse lähetyshetken
+  // tarkistusta.
+  useEffect(() => {
+    if (!assignMode) return
+    sb.from('installers').select('*').order('name').then(({ data }) => { if (data) setInstallers(data) })
+  }, [assignMode])
+
   // Assigns every current observation to one installer, tags them with a
   // shared report_batch so the recipient sees them as one job, and pushes a
   // real phone notification to that installer.
+  //
+  // HUOM (korjattu bugi): tämä näytti AINA "✓ Lähetetty" -viestin riippumatta
+  // siitä, onnistuiko itse tallennus (saveObs) oikeasti — jos tallennus
+  // epäonnistui esim. koska asentajalista oli jäänyt vanhaksi tässä auki
+  // olevassa välilehdessä (esim. käyttäjien poisto/uudelleenluonti sillä
+  // aikaa kun tämä sivu oli auki, jolloin valittu asentaja-id ei enää
+  // vastannut mitään olemassa olevaa asentajaa → tietokanta hylkäsi
+  // tallennuksen), käyttäjä näki siitä huolimatta vihreän onnistumisviestin
+  // ja havainto ei koskaan päätynyt asentajan sovellukseen. Korjattu: 1)
+  // asentajalista haetaan tuoreeltaan juuri ennen lähetystä ja valinta
+  // tarkistetaan sitä vasten, 2) tallennuksen oikea onnistuminen
+  // tarkistetaan eikä onnistumisviestiä näytetä jos joku havainto ei
+  // tallentunut, 3) onnistuneen lähetyksen jälkeen paikallinen lista
+  // tyhjennetään automaattisesti (pyydetty: lähetetyt havainnot eivät saa
+  // jäädä kertymään työnjohto-näkymään) — työmaa ja kirjaajan nimi
+  // säilyvät, jotta saman käynnin dokumentointia voi jatkaa heti perään.
   async function assignAndNotify() {
     if (!assignInstallerId || obs.length === 0) return
-    const reportBatch = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
     setAssignMsg('Lähetetään...')
 
-    const installer = installers.find(i => i.id === assignInstallerId)
+    const { data: freshInstallers, error: instErr } = await sb.from('installers').select('*').order('name')
+    if (instErr) { setAssignMsg('⚠ Asentajalistan haku epäonnistui — tarkista yhteys.'); return }
+    setInstallers(freshInstallers || [])
+    const installer = (freshInstallers || []).find(i => i.id === assignInstallerId)
+    if (!installer) {
+      setAssignMsg('⚠ Valittu asentaja ei ole enää voimassa (tili on poistettu/uusittu) — valitse asentaja listalta uudelleen.')
+      setAssignInstallerId('')
+      return
+    }
+
+    const reportBatch = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
     const updated = obs.map(o => ({ ...o, assignedInstallerId: assignInstallerId, status: 'avoin', reportBatch }))
     setObs(updated)
-    await Promise.all(updated.map(o => saveObs(o, site, inspector)))
+    const results = await Promise.all(updated.map(o => saveObs(o, site, inspector)))
+    const failCount = results.filter(r => r == null).length
+    if (failCount > 0) {
+      setAssignMsg(`⚠ ${failCount}/${updated.length} havaintoa ei tallentunut — havainnot säilyvät listalla, tarkista yhteys ja yritä uudelleen.`)
+      return
+    }
 
     const res = await sendPushNotification({
       role: 'installer',
@@ -309,8 +357,15 @@ function InspectorApp({ session, profile, logout }) {
       url: '/?asentaja=1',
       tag: reportBatch,
     })
-    setAssignMsg(res?.sent > 0 ? `✓ Lähetetty ${installer?.name || ''}` : '✓ Tallennettu (asentaja ei ehkä ole vielä ottanut ilmoituksia käyttöön)')
+    setAssignMsg(res?.sent > 0 ? `✓ Lähetetty ${installer?.name || ''}` : `✓ Tallennettu ${installer?.name || ''} (asentaja ei ehkä ole vielä ottanut ilmoituksia käyttöön)`)
     setTimeout(() => setAssignMsg(''), 4000)
+
+    // Kaikki tallentui onnistuneesti — tyhjennä paikallinen lista.
+    setObs([])
+    setCollapsedIds(new Set())
+    setQuickAddCounts({})
+    setAssignMode(false)
+    setAssignInstallerId('')
   }
 
   function removeObs(id) {

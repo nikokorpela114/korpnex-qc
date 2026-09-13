@@ -144,9 +144,15 @@ function DiarySiteEntries({ siteId, siteLabel, session, canManage, myName, compa
 
   const load = useCallback(async () => {
     setLoading(true); setErrMsg('')
-    const { data, error } = await sb.from('diary_entries').select('*')
-      .eq('site_id', siteId).eq('archived', false)
-      .order('created_at', { ascending: false })
+    // Valvomo (readOnly) näkee TARKOITUKSELLA koko yrityksen kaikki
+    // merkinnät tälle työmaalle — se on kooste-/seurantanäkymä. Työnjohto-
+    // ja Asentaja-sovelluksissa (readOnly=false) käyttäjä näkee VAIN omat
+    // merkintänsä, jotta usean työnjohtajan/asentajan merkinnät samalla
+    // työmaalla eivät sekoitu toistensa näkymään (pyydetty: "molemmissa
+    // pitäisi näkyä vain omat merkinnät sinne ja valvomossa sitten kaikki").
+    let q = sb.from('diary_entries').select('*').eq('site_id', siteId).eq('archived', false)
+    if (!readOnly) q = q.eq('created_by', session.user.id)
+    const { data, error } = await q.order('created_at', { ascending: false })
     if (error) {
       console.error('diary_entries load failed:', error)
       setErrMsg('⚠ Merkintöjen haku epäonnistui — tarkista yhteys ja päivitä.')
@@ -161,7 +167,7 @@ function DiarySiteEntries({ siteId, siteLabel, session, canManage, myName, compa
     }))
     setEntries(withUrls)
     setLoading(false)
-  }, [siteId])
+  }, [siteId, readOnly, session.user.id])
 
   useEffect(() => { load() }, [load])
 
