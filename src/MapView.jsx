@@ -351,6 +351,14 @@ export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, 
         >
           <rect width={W} height={H} fill="#eef4ec" />
 
+          {/* Pohjakuva-kartan taustakuva (kind==='image', esim. rakennuksen
+              pohjapiirustus). Aurinkovoimala-DXF-kartoilla mapData.imageUrl
+              ei ole asetettu, joten tämä ei renderöi mitään niille — täysin
+              muuttumaton käyttäytyminen niille. */}
+          {mapData.imageUrl && (
+            <image href={mapData.imageUrl} x={0} y={0} width={W} height={H} preserveAspectRatio="none" />
+          )}
+
           {/* PV areas */}
           {siteAreas.map((pts, i) => (
             <polygon
@@ -529,7 +537,7 @@ export default function MapView({ mapData, pin, onPin, gpsCoords, height = 240, 
       {/* Bottom bar */}
       {!readOnly && (
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '5px 10px', background: '#eef0f7', borderTop: '0.5px solid #d0d5e8' }}>
-          <span style={{ fontSize: 11, color: '#6670a0' }}>🔵 GPS · Napauta = punainen piste</span>
+          <span style={{ fontSize: 11, color: '#6670a0' }}>{mapData.kind === 'image' ? 'Napauta = punainen piste' : '🔵 GPS · Napauta = punainen piste'}</span>
           <button onClick={() => onPin(null)} style={{ background: 'none', border: 'none', fontSize: 11, color: '#d63030', padding: '2px 0' }}>Poista</button>
         </div>
       )}

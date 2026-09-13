@@ -3,8 +3,113 @@
 // (asentaja) välillä — tässä tiedostossa jotta kumpikaan ei tuo toistaan
 // suoraan (circular import -riski build-vaiheessa).
 
+import { parseDXF } from './dxfParser.js'
+
 export const ELEMENT_W_M = 1.15
 export const ELEMENT_ROW_DEPTH_M = 4.29
+
+// Kelvollinen UUID v4 — käytetään uuden site_maps-rivin id:ksi (pitää
+// täsmätä myös Storage-tallennuspolun tiedostonimeen, ks. App.jsx). Vaatii
+// aina kelvollisen UUID-MUOTOISEN merkkijonon koska site_maps.id on uuid-
+// sarake — crypto.randomUUID() on ensisijainen (kaikki nykyaikaiset selaimet
+// tukevat), varafunktio crypto.getRandomValues:lla jos joskus puuttuu.
+export function randomUUID() {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID()
+  const bytes = (typeof crypto !== 'undefined' && crypto.getRandomValues) ? crypto.getRandomValues(new Uint8Array(16)) : Array.from({ length: 16 }, () => Math.floor(Math.random() * 256))
+  bytes[6] = (bytes[6] & 0x0f) | 0x40
+  bytes[8] = (bytes[8] & 0x3f) | 0x80
+  const hex = Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('')
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+}
+
+// --- Työmaan kartat (site_maps) --------------------------------------------
+// HUOM (uusi ominaisuus): työmaalla voi olla aiemman YHDEN aurinkovoimala-
+// DXF-kartan sijaan useita karttoja rinnakkain — esim. DXF-kartta JA yksi tai
+// useampi tavallinen pohjakuva/kerros (rakennuksen pohjapiirustus, ladattuna
+// PDF:nä ja muunnettuna kuvaksi latauksen yhteydessä). Käyttäjä valitsee
+// kartan sovelluksessa pudotusvalikosta (ks. App.jsx/InstallerView.jsx).
+// Nämä apufunktiot ovat yhteisiä, jotta työnjohtaja- ja asentajanäkymä
+// lataavat/tulkitsevat kartat täysin samalla tavalla.
+
+// Palauttaa työmaan site_maps-rivit. Jos rivejä ei löydy — esim. työmaalle on
+// aiemmin (ennen tätä ominaisuutta) ladattu VAIN yksi DXF-kartta suoraan
+// vanhalla polulla {company_id}/{site_id}.dxf — tarkistetaan löytyykö tuo
+// vanha tiedosto ja luodaan sille automaattisesti yksi site_maps-rivi
+// ("Kartta"), jotta vanhat työmaat toimivat sellaisenaan eikä erillistä
+// taannehtivaa data-migraatiota tarvita.
+export async function listSiteMaps(sb, companyId, siteId) {
+  if (!siteId) return []
+  const { data: rows, error } = await sb.from('site_maps').select('*').eq('site_id', siteId).order('sort_order').order('created_at')
+  if (!error && rows && rows.length) return rows
+  try {
+    const legacyPath = `${companyId}/${siteId}.dxf`
+    const { data, error: dlErr } = await sb.storage.from('maps').download(legacyPath)
+    if (dlErr || !data) return []
+    const { data: created, error: insErr } = await sb.from('site_maps')
+      .insert([{ company_id: companyId, site_id: siteId, name: 'Kartta', kind: 'dxf', storage_path: legacyPath, sort_order: 0 }])
+      .select().single()
+    if (insErr || !created) return []
+    return [created]
+  } catch {
+    return []
+  }
+}
+
+// Lataa ja tulkitsee YHDEN site_maps-rivin sisällön MapView'lle sopivaan
+// muotoon. DXF parsitaan geometriaksi kuten ennenkin ("kind" puuttuu tästä
+// palautusarvosta silloin — käytetään aina mapData.kind === 'image' -tarkis-
+// tusta, ei koskaan käänteistä 'dxf'-tarkistusta, jotta vanhat MapView-
+// kutsupaikat joissa mapData.kind on undefined toimivat muuttumatta).
+// Pohjakuva (kind==='image') ladataan <img>-elementiksi (canvas-piirtoa
+// varten, ks. renderPinMapThumb/renderGroupMapImage) ja sille luodaan myös
+// objectURL (MapView'n SVG-taustakuvaa varten).
+export async function loadSiteMapContent(sb, rec) {
+  const { data, error } = await sb.storage.from('maps').download(rec.storage_path)
+  if (error || !data) throw new Error('Kartan lataus epäonnistui')
+  if (rec.kind === 'dxf') {
+    const text = await data.text()
+    const parsed = parseDXF(text)
+    if (!parsed) throw new Error('DXF-tiedostoa ei voitu lukea')
+    return parsed
+  }
+  const imageUrl = URL.createObjectURL(data)
+  const image = await new Promise((resolve, reject) => {
+    const img = new Image()
+    img.onload = () => resolve(img)
+    img.onerror = () => reject(new Error('Kuvan lukeminen epäonnistui'))
+    img.src = imageUrl
+  })
+  const W = image.naturalWidth || 1, H = image.naturalHeight || 1
+  return {
+    kind: 'image', W, H,
+    siteAreas: [], roads: [], boundaries: [], inserts: [], elementAreas: [], rowNumbers: [],
+    minX: 0, minY: 0, maxX: W, maxY: H,
+    image, imageUrl,
+  }
+}
+
+// Muuntaa PDF:n ensimmäisen sivun PNG-kuvaksi (Blob) suoraan selaimessa —
+// käytetään kun käyttäjä lataa pohjapiirustuksen PDF-tiedostona. pdfjs-dist
+// tuodaan dynaamisesti (await import) jotta se ei kasvata pääsovelluksen
+// alkuperäistä latauskokoa niille käyttäjille jotka eivät koskaan lataa
+// PDF-pohjakuvaa.
+export async function pdfFirstPageToPngBlob(file, maxDim = 2200) {
+  const mod = await import('pdfjs-dist')
+  const pdfjsLib = mod.default ?? mod
+  pdfjsLib.GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.min.js', import.meta.url).href
+  const buf = await file.arrayBuffer()
+  const pdf = await pdfjsLib.getDocument({ data: buf }).promise
+  const page = await pdf.getPage(1)
+  const baseViewport = page.getViewport({ scale: 1 })
+  const scale = Math.max(0.2, Math.min(4, maxDim / Math.max(baseViewport.width, baseViewport.height)))
+  const viewport = page.getViewport({ scale })
+  const canvas = document.createElement('canvas')
+  canvas.width = Math.max(1, Math.round(viewport.width))
+  canvas.height = Math.max(1, Math.round(viewport.height))
+  const ctx = canvas.getContext('2d')
+  await page.render({ canvasContext: ctx, viewport }).promise
+  return await new Promise(resolve => canvas.toBlob(resolve, 'image/png'))
+}
 
 // HUOM: KNOWN_SITES-vakio (kovakoodattu työmaalista) on POISTETTU
 // moniyritysversiossa — työmaat tulevat nyt sites-tietokantataulusta,
@@ -336,6 +441,31 @@ export function findPinRow(mapData, pin) {
 // canvas snapshot is dramatically cheaper: no event listeners, no live SVG
 // DOM per task, and it can be computed once and memoized.
 export function renderPinMapThumb(mapData, pin, outW = 700) {
+  // Pohjakuva-kartat (kind==='image', esim. rakennuksen pohjapiirustus) eivät
+  // sisällä mitään aurinkovoimalan pöytärivi-geometriaa (mapData.inserts on
+  // aina tyhjä), joten koko yllä olevan rivinhaku/korostuslogiikan sivuuttava
+  // OMA, yksinkertaisempi polku: rajataan kiinteä prosenttiosuus kuvasta
+  // pinnin ympäriltä ja piirretään taustakuva + punainen pinni sen päälle.
+  if (mapData.kind === 'image') {
+    const cropW = Math.min(mapData.W, mapData.W * 0.4)
+    const cropH = Math.min(mapData.H, mapData.H * 0.4)
+    const psx = pin.x * mapData.W, psy = pin.y * mapData.H
+    const svgX0 = Math.max(0, Math.min(mapData.W - cropW, psx - cropW / 2))
+    const svgY0 = Math.max(0, Math.min(mapData.H - cropH, psy - cropH / 2))
+    const svgCropW = cropW, svgCropH = cropH
+    const outH = Math.round(outW * svgCropH / svgCropW)
+    const canvas = document.createElement('canvas')
+    canvas.width = outW; canvas.height = outH
+    const ctx = canvas.getContext('2d')
+    ctx.fillStyle = '#eef4ec'; ctx.fillRect(0, 0, outW, outH)
+    if (mapData.image) ctx.drawImage(mapData.image, svgX0, svgY0, svgCropW, svgCropH, 0, 0, outW, outH)
+    const cx = (psx - svgX0) * (outW / svgCropW), cy = (psy - svgY0) * (outH / svgCropH)
+    ctx.beginPath(); ctx.arc(cx, cy, 8, 0, Math.PI * 2)
+    ctx.fillStyle = '#d63030'; ctx.fill()
+    ctx.strokeStyle = 'white'; ctx.lineWidth = 2.5; ctx.stroke()
+    return canvas.toDataURL('image/jpeg', 0.85)
+  }
+
   const sxm = mapData.W / (mapData.maxX - mapData.minX)
   const sym = mapData.H / (mapData.maxY - mapData.minY)
   const th = ELEMENT_ROW_DEPTH_M * sym
@@ -442,6 +572,48 @@ export function renderPinMapThumb(mapData, pin, outW = 700) {
 // syy miksi tämä tiedosto ylipäätään on olemassa — ks. tiedoston alun
 // kommentti). Nyt sekä App.jsx että InstallerView.jsx tuovat tämän täältä.
 export function renderGroupMapImage(mapData, items) {
+  // Pohjakuva-kartat (kind==='image') eivät sisällä pöytärivi-geometriaa
+  // (findPinRow ei löydä koskaan mitään, mapData.inserts on tyhjä), joten
+  // oma, yksinkertaisempi polku: rajataan pinnien yhteinen alue prosentti-
+  // pohjaisella marginaalilla (ei metripohjaisella th:lla, joka olisi
+  // merkityksetön pikselipohjaisessa pohjakuvassa) ja piirretään taustakuva.
+  if (mapData.kind === 'image') {
+    const pins = items.map(o => ({ x: o.pin.x * mapData.W, y: o.pin.y * mapData.H }))
+    const pad = Math.max(40, Math.max(mapData.W, mapData.H) * 0.12)
+    let minX = Math.min(...pins.map(p => p.x)) - pad
+    let maxX = Math.max(...pins.map(p => p.x)) + pad
+    let minY = Math.min(...pins.map(p => p.y)) - pad
+    let maxY = Math.max(...pins.map(p => p.y)) + pad
+    minX = Math.max(0, minX); minY = Math.max(0, minY)
+    maxX = Math.min(mapData.W, maxX); maxY = Math.min(mapData.H, maxY)
+    const svgCropW = Math.max(1, maxX - minX)
+    const MAX_ASPECT = 9
+    const minCropH = svgCropW / MAX_ASPECT
+    let svgCropH = Math.max(minCropH, maxY - minY)
+    const midY = (minY + maxY) / 2
+    let svgY0 = Math.max(0, midY - svgCropH / 2)
+    let svgY1 = Math.min(mapData.H, svgY0 + svgCropH)
+    svgCropH = Math.max(1, svgY1 - svgY0)
+    const svgX0 = minX
+    const outW = 1400, outH = Math.round(outW * svgCropH / svgCropW)
+    const canvas = document.createElement('canvas')
+    canvas.width = outW; canvas.height = outH
+    const mctx = canvas.getContext('2d')
+    mctx.fillStyle = '#eef4ec'; mctx.fillRect(0, 0, outW, outH)
+    const kx = outW / svgCropW, ky = outH / svgCropH
+    const px = sx => (sx - svgX0) * kx, py = sy => (sy - svgY0) * ky
+    if (mapData.image) mctx.drawImage(mapData.image, svgX0, svgY0, svgCropW, svgCropH, 0, 0, outW, outH)
+    pins.forEach((p, i) => {
+      const cx = px(p.x), cy = py(p.y)
+      mctx.beginPath(); mctx.arc(cx, cy, 11, 0, Math.PI * 2)
+      mctx.fillStyle = '#d63030'; mctx.fill()
+      mctx.strokeStyle = 'white'; mctx.lineWidth = 2; mctx.stroke()
+      mctx.font = 'bold 13px sans-serif'; mctx.fillStyle = 'white'; mctx.textAlign = 'center'
+      mctx.fillText(String(i + 1), cx, cy + 4)
+    })
+    return { dataUrl: canvas.toDataURL('image/jpeg', 0.92), outW, outH, rowLabels: items.map(() => null) }
+  }
+
   const sxm = mapData.W / (mapData.maxX - mapData.minX)
   const sym = mapData.H / (mapData.maxY - mapData.minY)
   const th = ELEMENT_ROW_DEPTH_M * sym

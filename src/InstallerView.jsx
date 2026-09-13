@@ -1,10 +1,9 @@
 // src/InstallerView.jsx
 import React, { useState, useEffect, useRef, useMemo } from 'react'
-import { parseDXF } from './dxfParser.js'
 import { latLngToTM35FIN } from './coords.js'
 import { sb } from './supabaseClient.js'
 import AuthGate from './AuthGate.jsx'
-import { renderPinMapThumb, CAT_EN, SEV_EN, compressImage } from './shared.js'
+import { renderPinMapThumb, CAT_EN, SEV_EN, compressImage, listSiteMaps, loadSiteMapContent } from './shared.js'
 import { subscribeToPush, sendPushNotification } from './push.js'
 import MapView from './MapView.jsx'
 import Diary from './Diary.jsx'
@@ -38,7 +37,17 @@ function InstallerApp({ session, profile, logout }) {
   const [tasks, setTasks] = useState(null) // null = ladataan
   const [siteId, setSiteId] = useState(null)
   const [diarySiteId, setDiarySiteId] = useState('') // Päiväkirjan valittu työmaa — oma valinta, ei sidottu tehtävälistan siteId:hen
-  const [mapData, setMapData] = useState(null)
+  // HUOM (useita karttoja per työmaa): siteMaps = työmaan kaikkien karttojen
+  // metatiedot, mapDataById = KAIKKIEN niiden ladattu/tulkittu sisältö
+  // (avaimena kartan id) — eri tehtävät voivat olla merkitty eri kartoille,
+  // niin että joka tehtävän pikkukartta (thumbById) tarvitsee OMAN karttansa.
+  // currentMapId/mapData ovat sitä varten että yläreunan yleiskartta ja GPS
+  // näyttävät vain YHDEN kartan kerrallaan (käyttäjä voi vaihtaa, jos
+  // työmaalla on useampi).
+  const [siteMaps, setSiteMaps] = useState([])
+  const [currentMapId, setCurrentMapId] = useState(null)
+  const [mapDataById, setMapDataById] = useState({})
+  const mapData = currentMapId ? (mapDataById[currentMapId] || null) : null
   const [gpsCoords, setGpsCoords] = useState(null)
   const [pushMsg, setPushMsg] = useState('')
   const [fixedBatch, setFixedBatch] = useState([]) // korjatut mutta ei vielä kuitatut asentajan istunnossa
@@ -170,24 +179,38 @@ function InstallerApp({ session, profile, logout }) {
   // listeners at once, which was heavy enough to crash mobile Safari
   // ("Toistuva ongelma verkkosivulla"). Only recomputes when the task list
   // or the map data actually changes.
+  // Kunkin tehtävän OMA kartta — jos map_id puuttuu (vanha havainto, luotu
+  // ennen tätä ominaisuutta), oletetaan sen kuuluvan ensimmäiseen/ainoaan
+  // karttaan (siteMaps[0]) — sama oletus kuin App.jsx:ssä, jotta yhden
+  // kartan työmaat toimivat muuttumatta.
+  function mapDataForTask(o) {
+    const mid = o.map_id || siteMaps[0]?.id
+    return mid ? mapDataById[mid] : null
+  }
+
   const thumbById = useMemo(() => {
     const map = new Map()
-    if (!mapData || !tasks) return map
+    if (!tasks) return map
     tasks.forEach(o => {
       if (o.pin_x == null) return
-      try { map.set(o.id, renderPinMapThumb(mapData, { x: o.pin_x, y: o.pin_y })) } catch (e) { console.error('thumb render failed:', e) }
+      const md = mapDataForTask(o)
+      if (!md) return
+      try { map.set(o.id, renderPinMapThumb(md, { x: o.pin_x, y: o.pin_y })) } catch (e) { console.error('thumb render failed:', e) }
     })
     return map
-  }, [mapData, tasks])
+  }, [mapDataById, tasks, siteMaps]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Kaikkien avointen tehtävien pinnit yhtä, elävää yleiskarttaa varten
   // listan yläreunassa — kevyt lisä thumbById:n rinnalle, ei korvaa sitä.
   // MapView'lle annetaan nämä extraPins-propsina (samat oranssit pisteet
   // joita työnjohtajan pikalisäyskin käyttää), ja pin=null koska mikään
-  // yksittäinen tehtävä ei ole tässä "valittuna".
+  // yksittäinen tehtävä ei ole tässä "valittuna". Rajattu NIIHIN tehtäviin
+  // jotka kuuluvat yläreunassa juuri nyt valittuun karttaan (currentMapId) —
+  // muiden karttojen pinnit näkyvät omissa pikkukartoissaan (thumbById) mutta
+  // ei sekoitettuna tähän yhteen yleiskarttaan.
   const overviewTasks = useMemo(
-    () => (tasks || []).filter(o => o.pin_x != null),
-    [tasks]
+    () => (tasks || []).filter(o => o.pin_x != null && (o.map_id || siteMaps[0]?.id) === currentMapId),
+    [tasks, siteMaps, currentMapId]
   )
   const overviewPins = useMemo(
     () => overviewTasks.map(o => ({ x: o.pin_x, y: o.pin_y })),
@@ -219,20 +242,34 @@ function InstallerApp({ session, profile, logout }) {
     if (found) setSiteId(found.id)
   }, [tasks, sites])
 
+  // Hakee työmaan KAIKKI kartat (site_maps, legacy-yhteensopivuus mukaan
+  // lukien — ks. listSiteMaps shared.js:ssä) ja lataa/tulkitsee JOKAISEN
+  // sisällön etukäteen (ei vasta tarpeen mukaan), koska eri tehtävät voivat
+  // olla merkitty eri kartoille ja niiden pikkukartat (thumbById) tarvitsevat
+  // kaikki sisällöt kerralla. Työmailla on käytännössä korkeintaan muutama
+  // kartta, niin tämä pysyy kevyenä.
   useEffect(() => {
     if (!siteId) return
-    setMapData(null)
-    sb.storage.from('maps').download(`${profile.company_id}/${siteId}.dxf`).then(({ data, error }) => {
-      if (error || !data) return
-      data.text().then(text => {
-        const parsed = parseDXF(text)
-        if (parsed) setMapData(parsed)
-      })
+    let cancelled = false
+    setSiteMaps([]); setCurrentMapId(null); setMapDataById({})
+    listSiteMaps(sb, profile.company_id, siteId).then(async rows => {
+      if (cancelled) return
+      setSiteMaps(rows)
+      if (rows.length) setCurrentMapId(rows[0].id)
+      const entries = await Promise.all(rows.map(async rec => {
+        try { return [rec.id, await loadSiteMapContent(sb, rec)] } catch (e) { console.error('Kartan lataus epäonnistui:', e); return null }
+      }))
+      if (cancelled) return
+      setMapDataById(Object.fromEntries(entries.filter(Boolean)))
     })
+    return () => { cancelled = true }
   }, [siteId, profile.company_id])
 
+  // GPS — sivuutetaan kokonaan pohjakuva-kartoilla (kind==='image'), koska
+  // niiden min/maxX/Y ovat kuvan pikselirajat, ei oikeita TM35FIN-metri-
+  // koordinaatteja — ks. samat perustelut App.jsx:n vastaavassa kommentissa.
   useEffect(() => {
-    if (!navigator.geolocation || !mapData) return
+    if (!navigator.geolocation || !mapData || mapData.kind === 'image') return
     const watcher = navigator.geolocation.watchPosition(pos => {
       const { x, y } = latLngToTM35FIN(pos.coords.latitude, pos.coords.longitude)
       const mapX = (x - mapData.minX) / (mapData.maxX - mapData.minX)
@@ -491,8 +528,15 @@ function InstallerApp({ session, profile, logout }) {
 
         {mapData && overviewPins.length > 0 && (
           <div style={{ marginBottom: 14 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: '#6670a0', marginBottom: 6 }}>
-              {t('overviewTitle')}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: '#6670a0' }}>
+                {t('overviewTitle')}
+              </div>
+              {siteMaps.length > 1 && (
+                <select value={currentMapId || ''} onChange={e => setCurrentMapId(e.target.value)} style={{ fontSize: 11.5, color: '#334', border: '1px solid #d0d5e8', borderRadius: 6, padding: '2px 5px', background: '#fff' }}>
+                  {siteMaps.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                </select>
+              )}
             </div>
             <MapView
               mapData={mapData}
@@ -530,7 +574,7 @@ function InstallerApp({ session, profile, logout }) {
               {o.note && <div style={{ padding: '8px 14px 0', fontSize: 13, color: '#333' }}>{o.note}</div>}
               {o.site && <div style={{ padding: '4px 14px 0', fontSize: 13.5, fontWeight: 600, color: '#3a4570' }}>📍 {o.site}{o.rivi ? ` · ${o.rivi}` : ''}</div>}
 
-              {mapData && o.pin_x != null && (
+              {o.pin_x != null && (
                 <div style={{ padding: 12 }}>
                   {thumbById.has(o.id) ? (
                     <img

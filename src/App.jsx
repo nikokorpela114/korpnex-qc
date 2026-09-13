@@ -8,7 +8,7 @@ import InstallerView from './InstallerView.jsx'
 import Dashboard from './Dashboard.jsx'
 import Diary from './Diary.jsx'
 import { subscribeToPush, sendPushNotification } from './push.js'
-import { ELEMENT_W_M, ELEMENT_ROW_DEPTH_M, CAT_EN, SEV_EN, PDF_STR, findPinRow, renderGroupMapImage, compressImage } from './shared.js'
+import { ELEMENT_W_M, ELEMENT_ROW_DEPTH_M, CAT_EN, SEV_EN, PDF_STR, findPinRow, renderGroupMapImage, compressImage, listSiteMaps, loadSiteMapContent, pdfFirstPageToPngBlob, randomUUID } from './shared.js'
 
 // Kiinteä vikaluokkalista poistettu — rakennustyömailla vika voi olla
 // mitä vain, joten käyttäjä kirjoittaa vian suoraan tekstikenttään (ks. o.cat
@@ -82,6 +82,14 @@ function InspectorApp({ session, profile, logout }) {
   const [obs, setObs] = useState([])
   const [mapData, setMapData] = useState(null)
   const [mapError, setMapError] = useState('')
+  // HUOM (uusi ominaisuus — useita karttoja per työmaa): työmaalla voi olla
+  // aiemman YHDEN aurinkovoimala-DXF-kartan sijaan useita karttoja rinnan
+  // (esim. DXF JA yksi tai useampi tavallinen pohjakuva/kerros). siteMaps on
+  // työmaan kaikkien karttojen metatietolista (site_maps-taulusta),
+  // currentMapId on käyttäjän tällä hetkellä valitsema — mapData on SEN
+  // sisältö (ladattu/parsittu, ks. loadSiteMapContent shared.js:ssä).
+  const [siteMaps, setSiteMaps] = useState([])
+  const [currentMapId, setCurrentMapId] = useState(null)
   const [currentSiteId, setCurrentSiteId] = useState('') // sites.id — käytetään DXF-tallennuspolussa
   const [gpsCoords, setGpsCoords] = useState(null)
   const [syncMsg, setSyncMsg] = useState('')
@@ -127,9 +135,17 @@ function InspectorApp({ session, profile, logout }) {
     })
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // GPS — convert ETRS-TM35FIN (EPSG:3067) coords from the DXF to lat/lng on the fly
+  // GPS — convert ETRS-TM35FIN (EPSG:3067) coords from the DXF to lat/lng on
+  // the fly. HUOM: pohjakuva-kartoilla (mapData.kind==='image', esim.
+  // rakennuksen pohjapiirustus) mapData.minX/maxX/minY/maxY ovat KUVAN
+  // PIKSELIRAJAT, ei aurinkovoimalan oikeita TM35FIN-metrikoordinaatteja —
+  // GPS-muunnos antaisi niillä täysin merkityksettömän tuloksen (satunnainen
+  // piste kuvan päällä), ja sisätiloissa GPS on joka tapauksessa liian
+  // epätarkka ollakseen hyödyllinen. Sivuutetaan GPS siis kokonaan
+  // pohjakuva-kartoilla — kartta toimii täysin normaalisti pelkällä
+  // napautuksella, GPS-pallo ei vain näy (ks. myös MapView.jsx).
   useEffect(() => {
-    if (!navigator.geolocation || !mapData) return
+    if (!navigator.geolocation || !mapData || mapData.kind === 'image') return
     const watcher = navigator.geolocation.watchPosition(pos => {
       const { x, y } = latLngToTM35FIN(pos.coords.latitude, pos.coords.longitude)
       const mapX = (x - mapData.minX) / (mapData.maxX - mapData.minX)
@@ -139,31 +155,44 @@ function InspectorApp({ session, profile, logout }) {
     return () => navigator.geolocation.clearWatch(watcher)
   }, [mapData])
 
-  // Load DXF from Supabase storage based on selected site. Tallennuspolku on
-  // {company_id}/{site_id}.dxf — sama polkukäytäntö kuin Storagen RLS-
-  // käytännöissä (ks. multi_tenant_schema.sql), joten muiden yritysten
-  // karttoja ei voi vahingossakaan päätyä lukemaan.
+  // Työmaan karttojen lista (site_maps) — ks. HUOM state-määrittelyjen
+  // yhteydessä. Legacy-yhteensopivuus (vanha suora {company_id}/{site_id}.dxf
+  // -polku, ennen tätä ominaisuutta) hoituu listSiteMaps-apufunktiossa
+  // automaattisesti, tarvitsee vain kutsua sitä.
   useEffect(() => {
-    if (currentSiteId) loadDXF(currentSiteId)
-  }, [currentSiteId])
+    setSiteMaps([]); setCurrentMapId(null); setMapData(null); setMapError('')
+    if (!currentSiteId) return
+    let cancelled = false
+    listSiteMaps(sb, companyId, currentSiteId).then(rows => {
+      if (cancelled) return
+      setSiteMaps(rows)
+      if (rows.length) setCurrentMapId(rows[0].id)
+      else setMapError('Ei karttaa tälle työmaalle')
+    })
+    return () => { cancelled = true }
+  }, [currentSiteId]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function loadDXF(siteId) {
-    setMapData(null)
-    setMapError('')
-    try {
-      const { data, error } = await sb.storage.from('maps').download(`${companyId}/${siteId}.dxf`)
-      if (error || !data) {
-        setMapError('Ei karttaa tälle työmaalle')
-        return
-      }
-      const text = await data.text()
-      const parsed = parseDXF(text)
-      if (parsed) setMapData(parsed)
-      else setMapError('DXF-tiedostoa ei voitu lukea')
-    } catch (e) {
-      setMapError('Ei karttaa tälle työmaalle')
-    }
-  }
+  // Valitun kartan (currentMapId) sisällön lataus/tulkinta — DXF parsitaan,
+  // pohjakuva ladataan <img>-elementiksi. Vanha objectURL vapautetaan aina
+  // ennen uutta latausta (revokeObjectURL), jottei selain kerää niitä
+  // muistiin loputtomasti kartanvaihtojen yhteydessä.
+  const mapObjectUrlRef = useRef(null)
+  useEffect(() => {
+    const rec = siteMaps.find(m => m.id === currentMapId)
+    if (mapObjectUrlRef.current) { URL.revokeObjectURL(mapObjectUrlRef.current); mapObjectUrlRef.current = null }
+    if (!rec) { setMapData(null); return }
+    setMapData(null); setMapError('')
+    let cancelled = false
+    loadSiteMapContent(sb, rec).then(data => {
+      if (cancelled) return
+      if (data.imageUrl) mapObjectUrlRef.current = data.imageUrl
+      setMapData(data)
+    }).catch(e => {
+      if (cancelled) return
+      setMapError(e.message || 'Kartan lataus epäonnistui')
+    })
+    return () => { cancelled = true }
+  }, [currentMapId, siteMaps])
 
   function showSync(msg) {
     setSyncMsg(msg)
@@ -176,6 +205,9 @@ function InspectorApp({ session, profile, logout }) {
       cat: o.cat, sev: o.sev, note: o.note, muu: o.muu,
       type: o.type || 'vika',
       pin_x: o.pin?.x ?? null, pin_y: o.pin?.y ?? null,
+      // Kumpaan karttaan pinni kuuluu, jos työmaalla on useita karttoja
+      // rinnakkain (ks. HUOM state-määrittelyjen yhteydessä yllä).
+      map_id: o.mapId ?? null,
       // Paikka on nyt OMA kenttä per havainto (o.rivi), ei enää koko
       // raportille yhteinen arvo — ks. kortin "Paikka"-kenttä JSX:ssä.
       site: currentSite, inspector: currentInspector, rivi: o.rivi || null,
@@ -284,7 +316,10 @@ function InspectorApp({ session, profile, logout }) {
     // vika löytyy peräkkäin samasta kohdasta, mutta silti aina muokattavissa
     // kortilla itsellään (ks. "Paikka"-kenttä alla).
     const lastRivi = obs.length ? (obs[obs.length - 1].rivi || '') : ''
-    setObs(prev => [...prev, { id, cat: '', sev: 'Huomio', note: '', muu: '', rivi: lastRivi, type: 'vika', photos: [], pin: null, db_id: null, createdAt: new Date().toISOString() }])
+    // mapId merkitään talteen luontihetkellä — kertoo myöhemmin KUMPAAN
+    // kartaan tämän havainnon pinni kuuluu, jos työmaalla on useita karttoja
+    // (ks. HUOM state-määrittelyjen yhteydessä).
+    setObs(prev => [...prev, { id, cat: '', sev: 'Huomio', note: '', muu: '', rivi: lastRivi, type: 'vika', photos: [], pin: null, mapId: currentMapId, db_id: null, createdAt: new Date().toISOString() }])
   }
 
   // Vaihtaa havainnon "Vika"/"Läheltäpiti" -tyyppiä. Läheltäpiti-ilmoituksilla
@@ -425,7 +460,11 @@ function InspectorApp({ session, profile, logout }) {
   function setPin(id, pin) {
     setObs(prev => prev.map(o => {
       if (o.id !== id) return o
-      const updated = { ...o, pin }
+      // mapId varmistetaan/merkitään myös tässä (ei vain addObs:ssa) — jos
+      // havainto luotiin ennen kuin kartta oli valittu, tai käyttäjä on
+      // sillä välin vaihtanut karttaa, pinni kirjataan sen kartan mukaan
+      // jota napautettiin JUURI NYT.
+      const updated = { ...o, pin, mapId: pin ? currentMapId : o.mapId }
       saveObs(updated, site, inspector)
       return updated
     }))
@@ -442,7 +481,7 @@ function InspectorApp({ session, profile, logout }) {
       const id = ++idCounter
       const clone = {
         id, cat: o.cat, sev: o.sev, note: '', muu: o.muu, rivi: o.rivi || '', type: o.type || 'vika', photos: [],
-        pin, db_id: null, createdAt: new Date().toISOString(),
+        pin, mapId: currentMapId, db_id: null, createdAt: new Date().toISOString(),
         clonedFrom: o.id, // pikalisäyksen aikana luotu — käytetään extraPins-listaan MapView'ssa
       }
       setObs(prev => [...prev, clone])
@@ -497,23 +536,68 @@ function InspectorApp({ session, profile, logout }) {
     }))
   }
 
-  // DXF upload
-  async function handleDXFUpload(e) {
+  // Uuden kartan lisäys (DXF/DWG = aurinkovoimalan elementtikartta, PDF/kuva
+  // = tavallinen pohjakuva/kerros — ks. HUOM state-määrittelyjen yhteydessä).
+  // PDF muunnetaan automaattisesti kuvaksi (ensimmäinen sivu) latauksen
+  // yhteydessä, käyttäjän ei tarvitse tehdä sitä itse.
+  async function handleAddMap(e) {
     const file = e.target.files[0]
+    e.target.value = '' // sallii saman tiedoston valitsemisen uudelleen myöhemmin
     if (!file) return
+    const suggested = siteMaps.length === 0 ? 'Kartta' : ''
+    const name = window.prompt('Kartan nimi (esim. "1. krs" tai "Aurinkovoimala"):', suggested)
+    if (name === null) return // peruttu
+    const finalName = name.trim() || 'Kartta'
+    const ext = (file.name.split('.').pop() || '').toLowerCase()
     showSync('Ladataan karttaa...')
-    const text = await file.text()
-    const parsed = parseDXF(text)
-    if (parsed) {
-      setMapData(parsed)
-      setMapError('')
+    try {
+      let uploadBlob = file, storageExt, kind
+      if (ext === 'dxf' || ext === 'dwg') {
+        kind = 'dxf'; storageExt = 'dxf'
+        const text = await file.text()
+        if (!parseDXF(text)) { showSync('⚠ DXF-tiedostoa ei voitu lukea'); return }
+      } else if (ext === 'pdf') {
+        kind = 'image'; storageExt = 'png'
+        uploadBlob = await pdfFirstPageToPngBlob(file)
+        if (!uploadBlob) { showSync('⚠ PDF:n muuntaminen kuvaksi epäonnistui'); return }
+      } else if (['png', 'jpg', 'jpeg', 'webp'].includes(ext)) {
+        kind = 'image'; storageExt = ext
+      } else {
+        showSync('⚠ Tiedostomuotoa ei tueta (dxf/dwg/pdf/png/jpg)')
+        return
+      }
+      const newMapId = randomUUID()
+      const path = `${companyId}/${currentSiteId}/${newMapId}.${storageExt}`
+      const { error: upErr } = await sb.storage.from('maps').upload(path, uploadBlob, { upsert: true })
+      if (upErr) throw upErr
+      const { data: created, error: insErr } = await sb.from('site_maps')
+        .insert([{ id: newMapId, company_id: companyId, site_id: currentSiteId, name: finalName, kind, storage_path: path, sort_order: siteMaps.length }])
+        .select().single()
+      if (insErr) throw insErr
+      setSiteMaps(prev => [...prev, created])
+      setCurrentMapId(created.id)
       showSync('✓ Kartta ladattu!')
-      try {
-        await sb.storage.from('maps').upload(`${companyId}/${currentSiteId}.dxf`, file, { upsert: true })
-      } catch {}
-    } else {
-      showSync('⚠ DXF-tiedostoa ei voitu lukea')
+    } catch (err) {
+      console.error('Kartan lataus epäonnistui:', err)
+      showSync('⚠ Kartan lataus epäonnistui')
     }
+  }
+
+  // Poistaa kartan (metatiedon + tiedoston Storagesta). Havainnot joiden
+  // pinni oli tällä kartalla säilyvät ennallaan Supabasessa (map_id nollautuu
+  // automaattisesti ON DELETE SET NULL -viittauksen ansiosta), mutta niiden
+  // sijaintia ei enää voi näyttää millään kartalla.
+  async function handleDeleteMap(mapId) {
+    const rec = siteMaps.find(m => m.id === mapId)
+    if (!rec) return
+    if (!window.confirm(`Poistetaanko kartta "${rec.name}"? Tällä kartalla olevien havaintojen sijainti katoaa (havainnot itse säilyvät).`)) return
+    try { await sb.storage.from('maps').remove([rec.storage_path]) } catch (e) { console.error('Kartan tiedoston poisto epäonnistui:', e) }
+    await sb.from('site_maps').delete().eq('id', mapId)
+    setSiteMaps(prev => {
+      const next = prev.filter(m => m.id !== mapId)
+      if (currentMapId === mapId) setCurrentMapId(next[0]?.id ?? null)
+      return next
+    })
   }
 
   // PDF export
@@ -584,7 +668,10 @@ function InspectorApp({ session, profile, logout }) {
 
         // One combined map for every pin in this category, numbered to match
         // the list below.
-        const withPin = g.items.filter(o => o.pin)
+        // Karsitaan pois havainnot joiden pinni on JOLLAKIN TOISELLA kartalla
+        // kuin se joka on juuri nyt latautuneena (mapData) — yhteiskuvassa ei
+        // voi sekoittaa kahden eri kartan koordinaatteja.
+        const withPin = g.items.filter(o => o.pin && (o.mapId ?? currentMapId) === currentMapId)
         let rowLabelByItem = new Map()
         if (withPin.length && mapData) {
           if (y + 150 > 278) { doc.addPage(); y = 18 }
@@ -687,7 +774,11 @@ function InspectorApp({ session, profile, logout }) {
       }
 
       // Map thumbnail - uses the zoom level left on screen, centered on the pin, pin's row highlighted in red
-      if (o.pin && mapData) {
+      // HUOM: mapData on vain SEN YHDEN kartan sisältö joka on juuri nyt
+      // valittuna (currentMapId) — jos työmaalla on useita karttoja ja tämä
+      // havainto on merkitty JOLLEKIN TOISELLE kartalle, ei näytetä väärää
+      // karttaa/pinniä, koska koordinaatit eivät täsmäisi.
+      if (o.pin && mapData && (o.mapId ?? currentMapId) === currentMapId) {
         if (y + 150 > 278) { doc.addPage(); y = 18 }
         doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(100, 100, 120)
         doc.text(T.location, M + 2, y); y += 4
@@ -725,6 +816,10 @@ function InspectorApp({ session, profile, logout }) {
           mctx.fillStyle = '#eef4ec'; mctx.fillRect(0, 0, outW, outH)
           const kx = outW / svgCropW, ky = outH / svgCropH
           const px = sx => (sx - svgX0) * kx, py = sy => (sy - svgY0) * ky
+
+          // Pohjakuva-kartan taustakuva (kind==='image') — DXF-kartoilla
+          // mapData.image ei ole asetettu, joten tämä ei tee mitään niille.
+          if (mapData.image) mctx.drawImage(mapData.image, svgX0, svgY0, svgCropW, svgCropH, 0, 0, outW, outH)
 
           mctx.fillStyle = 'rgba(200,223,245,0.85)'; mctx.strokeStyle = '#4a90d9'; mctx.lineWidth = 1.2
           mapData.siteAreas.forEach(pts => {
@@ -904,25 +999,43 @@ function InspectorApp({ session, profile, logout }) {
           </button>
         </div>
 
-        {/* DXF upload if no map */}
-        {!mapData && (
+        {/* Kartan lataus, jos työmaalla ei ole yhtään karttaa vielä.
+            Hyväksyy DXF/DWG:n (aurinkovoimalan elementtikartta) LISÄKSI
+            PDF:n ja kuvatiedostot (tavallinen pohjapiirustus/kerros) —
+            PDF muunnetaan automaattisesti kuvaksi. */}
+        {siteMaps.length === 0 && (
           <div style={{ margin: '12px 16px', padding: 16, background: '#fff', borderRadius: 12, border: '1.5px dashed #b0b8d8', textAlign: 'center' }}>
             <p style={{ fontSize: 13, color: '#6670a0', marginBottom: 10 }}>
               {mapError || 'Ladataan karttaa...'}
             </p>
             <button onClick={() => fileInputRef.current.click()} style={{ background: '#1560c4', color: '#fff', border: 'none', borderRadius: 8, padding: '9px 20px', fontSize: 13, fontWeight: 700 }}>
-              📂 Lataa DXF tälle työmaalle
+              📂 Lataa kartta tälle työmaalle (DXF/PDF/kuva)
             </button>
-            <input ref={fileInputRef} type="file" accept=".dxf,.dwg" style={{ display: 'none' }} onChange={handleDXFUpload} />
+            <input ref={fileInputRef} type="file" accept=".dxf,.dwg,.pdf,.png,.jpg,.jpeg,.webp" style={{ display: 'none' }} onChange={handleAddMap} />
           </div>
         )}
 
-        {mapData && (
-          <div style={{ margin: '8px 16px 0', display: 'flex', justifyContent: 'flex-end' }}>
+        {/* Karttavalitsin — näytetään aina kun työmaalla on vähintään yksi
+            kartta, jotta useita karttoja (esim. aurinkovoimala-DXF JA
+            pohjapiirustus, tai useampi kerros) voi vaihtaa pudotusvalikosta.
+            "+ Lisää kartta" -nappi on aina näkyvissä; roskakori poistaa
+            valittuna olevan kartan. */}
+        {siteMaps.length > 0 && (
+          <div style={{ margin: '8px 16px 0', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+            {siteMaps.length > 1 && (
+              <select value={currentMapId || ''} onChange={e => setCurrentMapId(e.target.value)} style={{ fontSize: 11.5, color: '#334', border: '1px solid #d0d5e8', borderRadius: 6, padding: '3px 6px', background: '#fff' }}>
+                {siteMaps.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+              </select>
+            )}
             <button onClick={() => fileInputRef.current.click()} style={{ background: 'none', border: 'none', fontSize: 11, color: '#6670a0' }}>
-              🗺 Vaihda kartta
+              🗺 + Lisää kartta
             </button>
-            <input ref={fileInputRef} type="file" accept=".dxf,.dwg" style={{ display: 'none' }} onChange={handleDXFUpload} />
+            {currentMapId && (
+              <button onClick={() => handleDeleteMap(currentMapId)} title="Poista tämä kartta" style={{ background: 'none', border: 'none', fontSize: 11, color: '#d63030' }}>
+                🗑
+              </button>
+            )}
+            <input ref={fileInputRef} type="file" accept=".dxf,.dwg,.pdf,.png,.jpg,.jpeg,.webp" style={{ display: 'none' }} onChange={handleAddMap} />
           </div>
         )}
 
@@ -1044,25 +1157,38 @@ function InspectorApp({ session, profile, logout }) {
                 </div>
 
                 {/* Map */}
-                {mapData && (
-                  <div>
-                    <div style={labelStyle}>Sijainti kartalla</div>
-                    <MapView
-                      mapData={mapData}
-                      pin={o.pin}
-                      onPin={pin => handleMapTap(o, pin)}
-                      gpsCoords={gpsCoords}
-                      onViewChange={view => setMapView(o.id, view)}
-                      extraPins={quickAddId === o.id ? obs.filter(x => x.clonedFrom === o.id).map(x => x.pin) : []}
-                    />
-                    {o.pin && (() => {
-                      const r = findPinRow(mapData, o.pin)
-                      return r ? (
-                        <div style={{ marginTop: 6, fontSize: 12, color: '#1a8a50', fontWeight: 700 }}>
-                          📍 Havaittu rivi: {r.label}
+                {mapData && (() => {
+                  // Jos tällä havainnolla on jo pinni JOLLAKIN TOISELLA
+                  // kartalla kuin se joka on juuri nyt valittuna, ei näytetä
+                  // sitä pinniä TÄLLÄ kartalla (koordinaatit eivät täsmäisi
+                  // toisen kartan mittoihin) — napauttaminen kuitenkin toimii
+                  // normaalisti ja siirtää havainnon TÄLLE kartalle.
+                  const onOtherMap = o.pin && o.mapId && o.mapId !== currentMapId
+                  const otherMapName = onOtherMap ? (siteMaps.find(m => m.id === o.mapId)?.name || 'toinen kartta') : null
+                  return (
+                    <div>
+                      <div style={labelStyle}>Sijainti kartalla</div>
+                      {onOtherMap && (
+                        <div style={{ marginBottom: 6, fontSize: 12, color: '#a06a00' }}>
+                          ⚠ Sijainti on merkitty kartalle "{otherMapName}" — napauta tätä karttaa jos haluat siirtää sijainnin tähän karttaan.
                         </div>
-                      ) : null
-                    })()}
+                      )}
+                      <MapView
+                        mapData={mapData}
+                        pin={onOtherMap ? null : o.pin}
+                        onPin={pin => handleMapTap(o, pin)}
+                        gpsCoords={gpsCoords}
+                        onViewChange={view => setMapView(o.id, view)}
+                        extraPins={quickAddId === o.id ? obs.filter(x => x.clonedFrom === o.id).map(x => x.pin) : []}
+                      />
+                      {!onOtherMap && o.pin && (() => {
+                        const r = findPinRow(mapData, o.pin)
+                        return r ? (
+                          <div style={{ marginTop: 6, fontSize: 12, color: '#1a8a50', fontWeight: 700 }}>
+                            📍 Havaittu rivi: {r.label}
+                          </div>
+                        ) : null
+                      })()}
                     {o.pin && (
                       <div style={{ marginTop: 8 }}>
                         {quickAddId === o.id ? (
@@ -1079,8 +1205,9 @@ function InspectorApp({ session, profile, logout }) {
                         )}
                       </div>
                     )}
-                  </div>
-                )}
+                    </div>
+                  )
+                })()}
 
                 {/* Photos */}
                 <div>
