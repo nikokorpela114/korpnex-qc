@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="fi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Korpnex Valvomo" id="apple-title-meta">
+  <meta name="theme-color" content="#070b17">
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <!--
+    HUOM (korjattu bugi — "Lisää Koti-valikkoon" avasi aina Työnjohto-appin):
+    tämä on VALVOMON OMA, aidosti erillinen index.html osoitteessa
+    "/valvomo/" — ei enää sama tiedosto kuin Työnjohdolla/Asentajalla, jotka
+    olivat aiemmin eroteltu VAIN ?query-parametrilla. Manifest-linkki ja
+    otsikko ovat tässä VALMIIKSI oikein suoraan HTML:ssä (ei JS:n varassa),
+    koska iOS Safarin "Lisää Koti-valikkoon" lukee ne suoraan palvelimen
+    tarjoamasta HTML:stä eikä ajonaikaisesti muokatusta DOM:ista — pelkkä
+    query-parametrilla erottelu ei riittänyt, koska palvelin tarjosi joka
+    tapauksessa saman, oletus-HTML:n riippumatta query-parametrista.
+    Ks. App.jsx:n ja vite.config.js:n vastaavat HUOM-kommentit.
+  -->
+  <link rel="manifest" href="/manifest-valvomo.json" id="app-manifest">
+  <title>Korpnex Valvomo</title>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="module" src="/src/main.jsx"></script>
+</body>
+</html>
