@@ -17,6 +17,8 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react'
 import { sb } from './supabaseClient.js'
 import AuthGate, { describeFnError } from './AuthGate.jsx'
 import Diary from './Diary.jsx'
+import { parseDXF } from './dxfParser.js'
+import { listSiteMaps, pdfFirstPageToPngBlob, randomUUID } from './shared.js'
 
 const sevColor = { Kriittinen: '#b02828', Huomio: '#a06800', Info: '#1a7a45' }
 const sevBg = { Kriittinen: '#fde2e2', Huomio: '#fdf0d5', Info: '#dcefe3' }
@@ -55,6 +57,16 @@ function DashboardInner({ session, profile, logout }) {
   const [busy, setBusy] = useState(false)
   const [lightboxSrc, setLightboxSrc] = useState(null) // korjauskuvan suurennettu näkymä
   const [historyExportBusy, setHistoryExportBusy] = useState(false) // "Lataa työmaan koko historia" -PDF kesken
+
+  // --- Työmaan kartat (site_maps) ---
+  // HUOM (siirretty tänne Työnjohto-näkymästä): kartan LATAUS/POISTO tehdään
+  // nyt Valvomosta, koska pohjapiirustukset ovat tyypillisesti sähköpostissa
+  // tai tietokoneella, ei kentällä käytettävässä puhelimessa. Työnjohto
+  // näyttää edelleen kartan ja antaa VALITA/napauttaa sitä, mutta ei enää
+  // lataa/poista karttoja itse.
+  const [mapsBySite, setMapsBySite] = useState({}) // { [siteId]: [siteMapsRow, ...] }
+  const [expandedMapsSiteId, setExpandedMapsSiteId] = useState(null)
+  const [mapUploadBusy, setMapUploadBusy] = useState(false)
 
   // --- Päiväkirja-välilehden tila (työmaa = päiväkirjan "projekti", ks. Diary.jsx) ---
   const [diarySiteFilter, setDiarySiteFilter] = useState('')
@@ -397,6 +409,73 @@ function DashboardInner({ session, profile, logout }) {
     const { error } = await sb.from('sites').delete().eq('id', id)
     if (error) { alert('Poisto epäonnistui: ' + error.message); return }
     load()
+  }
+
+  // --- Työmaan kartat (site_maps) ---
+  async function loadMapsFor(siteId) {
+    const rows = await listSiteMaps(sb, companyId, siteId)
+    setMapsBySite(prev => ({ ...prev, [siteId]: rows }))
+  }
+  function toggleMapsPanel(siteId) {
+    setExpandedMapsSiteId(prev => {
+      const next = prev === siteId ? null : siteId
+      if (next) loadMapsFor(siteId)
+      return next
+    })
+  }
+  // Uuden kartan lisäys — DXF/DWG = aurinkovoimalan elementtikartta, PDF/kuva
+  // = tavallinen pohjakuva/kerros. PDF muunnetaan automaattisesti kuvaksi
+  // (ensimmäinen sivu) latauksen yhteydessä. Virheet näytetään SUORAAN
+  // `alert()`-viestissä täydellä error.message-tekstillä (samaan tapaan kuin
+  // muuallakin tällä sivulla) — jotta käyttäjä näkee TARKAN syyn itse, ei
+  // tarvitse kaivaa selaimen kehittäjätyökaluista.
+  async function handleAddMap(siteId, file) {
+    if (!file) return
+    const existing = mapsBySite[siteId] || []
+    const name = window.prompt('Kartan nimi (esim. "1. krs" tai "Aurinkovoimala"):', existing.length === 0 ? 'Kartta' : '')
+    if (name === null) return
+    const finalName = name.trim() || 'Kartta'
+    const ext = (file.name.split('.').pop() || '').toLowerCase()
+    setMapUploadBusy(true)
+    try {
+      let uploadBlob = file, storageExt, kind
+      if (ext === 'dxf' || ext === 'dwg') {
+        kind = 'dxf'; storageExt = 'dxf'
+        const text = await file.text()
+        if (!parseDXF(text)) throw new Error('DXF-tiedostoa ei voitu lukea — tarkista että tiedosto on kelvollinen DXF-kartta.')
+      } else if (ext === 'pdf') {
+        kind = 'image'; storageExt = 'png'
+        uploadBlob = await pdfFirstPageToPngBlob(file)
+        if (!uploadBlob) throw new Error('PDF:n muuntaminen kuvaksi epäonnistui.')
+      } else if (['png', 'jpg', 'jpeg', 'webp'].includes(ext)) {
+        kind = 'image'; storageExt = ext
+      } else {
+        throw new Error('Tiedostomuotoa ei tueta — käytä DXF/DWG/PDF/PNG/JPG-tiedostoa.')
+      }
+      const newMapId = randomUUID()
+      const path = `${companyId}/${siteId}/${newMapId}.${storageExt}`
+      const { error: upErr } = await sb.storage.from('maps').upload(path, uploadBlob, { upsert: true })
+      if (upErr) throw new Error('Tallennus epäonnistui (Storage): ' + upErr.message)
+      const { data: created, error: insErr } = await sb.from('site_maps')
+        .insert([{ id: newMapId, company_id: companyId, site_id: siteId, name: finalName, kind, storage_path: path, sort_order: existing.length }])
+        .select().single()
+      if (insErr) throw new Error('Tallennus epäonnistui (tietokanta): ' + insErr.message + (insErr.message?.includes('relation') ? '\n\nOletko ajanut add_site_maps.sql:n Supabasen SQL Editorissa?' : ''))
+      setMapsBySite(prev => ({ ...prev, [siteId]: [...(prev[siteId] || []), created] }))
+    } catch (err) {
+      console.error('Kartan lataus epäonnistui:', err)
+      alert('Kartan lataus epäonnistui: ' + (err.message || 'tuntematon virhe'))
+    } finally {
+      setMapUploadBusy(false)
+    }
+  }
+  async function handleDeleteMap(siteId, mapId) {
+    const rec = (mapsBySite[siteId] || []).find(m => m.id === mapId)
+    if (!rec) return
+    if (!window.confirm(`Poistetaanko kartta "${rec.name}"? Tällä kartalla olevien havaintojen sijainti katoaa (havainnot itse säilyvät).`)) return
+    try { await sb.storage.from('maps').remove([rec.storage_path]) } catch (e) { console.error('Kartan tiedoston poisto epäonnistui:', e) }
+    const { error } = await sb.from('site_maps').delete().eq('id', mapId)
+    if (error) { alert('Poisto epäonnistui: ' + error.message); return }
+    setMapsBySite(prev => ({ ...prev, [siteId]: (prev[siteId] || []).filter(m => m.id !== mapId) }))
   }
 
   // --- Urakoitsijat ---
@@ -911,13 +990,44 @@ function DashboardInner({ session, profile, logout }) {
               <div style={{ fontWeight: 700, fontSize: 15, color: '#0d1a6e', marginBottom: 14 }}>Yrityksen työmaat</div>
               {sites.length === 0 && <div style={{ fontSize: 13, color: '#9aa2c0' }}>Ei työmaita vielä — luo ensimmäinen yllä.</div>}
               {sites.map(s => (
-                <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '9px 0', borderBottom: '1px solid #f4f5fa', gap: 10 }}>
-                  <span style={{ fontSize: 14 }}>📍 {s.label}</span>
-                  <button onClick={() => deleteSite(s.id)} title="Poista työmaa" style={{ background: 'none', border: 'none', color: '#b02828', fontSize: 15, cursor: 'pointer', padding: '2px 4px' }}>🗑️</button>
+                <div key={s.id} style={{ borderBottom: '1px solid #f4f5fa', padding: '9px 0' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+                    <span style={{ fontSize: 14 }}>📍 {s.label}</span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <button onClick={() => toggleMapsPanel(s.id)} style={{ background: 'none', border: 'none', color: '#1560c4', fontSize: 12.5, cursor: 'pointer', padding: '2px 6px', fontWeight: 600 }}>
+                        🗺 Kartat {mapsBySite[s.id] ? `(${mapsBySite[s.id].length})` : ''} {expandedMapsSiteId === s.id ? '▲' : '▼'}
+                      </button>
+                      <button onClick={() => deleteSite(s.id)} title="Poista työmaa" style={{ background: 'none', border: 'none', color: '#b02828', fontSize: 15, cursor: 'pointer', padding: '2px 4px' }}>🗑️</button>
+                    </div>
+                  </div>
+
+                  {expandedMapsSiteId === s.id && (
+                    <div style={{ marginTop: 8, marginLeft: 8, padding: 10, background: '#f8f9fd', borderRadius: 8 }}>
+                      {(mapsBySite[s.id] || []).length === 0 && (
+                        <div style={{ fontSize: 12.5, color: '#9aa2c0', marginBottom: 8 }}>Ei karttoja vielä tälle työmaalle.</div>
+                      )}
+                      {(mapsBySite[s.id] || []).map(m => (
+                        <div key={m.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '5px 0', fontSize: 13 }}>
+                          <span>{m.kind === 'dxf' ? '⚡' : '🖼️'} {m.name}</span>
+                          <button onClick={() => handleDeleteMap(s.id, m.id)} title="Poista kartta" style={{ background: 'none', border: 'none', color: '#b02828', fontSize: 13, cursor: 'pointer', padding: '2px 4px' }}>🗑️</button>
+                        </div>
+                      ))}
+                      <label style={{ display: 'inline-block', marginTop: 8, padding: '7px 14px', background: mapUploadBusy ? '#9aa2c0' : '#1560c4', color: '#fff', borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: mapUploadBusy ? 'default' : 'pointer' }}>
+                        {mapUploadBusy ? 'Ladataan…' : '+ Lisää kartta (DXF/PDF/kuva)'}
+                        <input
+                          type="file" accept=".dxf,.dwg,.pdf,.png,.jpg,.jpeg,.webp" style={{ display: 'none' }} disabled={mapUploadBusy}
+                          onChange={e => { const f = e.target.files[0]; e.target.value = ''; handleAddMap(s.id, f) }}
+                        />
+                      </label>
+                      <div style={{ fontSize: 11, color: '#9aa2c0', marginTop: 6 }}>
+                        PDF muunnetaan automaattisesti kuvaksi. Työmaalla voi olla useita karttoja — työnjohtaja valitsee niiden väliltä omassa näkymässään.
+                      </div>
+                    </div>
+                  )}
                 </div>
               ))}
               <div style={{ fontSize: 11.5, color: '#9aa2c0', marginTop: 14 }}>
-                Työmaan kartta (DXF) ladataan työnjohtajan näkymässä (oletusnäkymä) työmaan valinnan yhteydessä.
+                Kartat (aurinkovoimalan DXF tai tavallinen pohjakuva/PDF) ladataan tästä, kunkin työmaan "🗺 Kartat" -kohdasta.
               </div>
             </div>
           </div>

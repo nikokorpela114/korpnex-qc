@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import MapView from './MapView.jsx'
-import { parseDXF } from './dxfParser.js'
 import { latLngToTM35FIN } from './coords.js'
 import { sb } from './supabaseClient.js'
 import AuthGate from './AuthGate.jsx'
@@ -8,7 +7,7 @@ import InstallerView from './InstallerView.jsx'
 import Dashboard from './Dashboard.jsx'
 import Diary from './Diary.jsx'
 import { subscribeToPush, sendPushNotification } from './push.js'
-import { ELEMENT_W_M, ELEMENT_ROW_DEPTH_M, CAT_EN, SEV_EN, PDF_STR, findPinRow, renderGroupMapImage, compressImage, listSiteMaps, loadSiteMapContent, pdfFirstPageToPngBlob, randomUUID } from './shared.js'
+import { ELEMENT_W_M, ELEMENT_ROW_DEPTH_M, CAT_EN, SEV_EN, PDF_STR, findPinRow, renderGroupMapImage, compressImage, listSiteMaps, loadSiteMapContent } from './shared.js'
 
 // Kiinteä vikaluokkalista poistettu — rakennustyömailla vika voi olla
 // mitä vain, joten käyttäjä kirjoittaa vian suoraan tekstikenttään (ks. o.cat
@@ -113,7 +112,6 @@ function InspectorApp({ session, profile, logout }) {
   const [assignMode, setAssignMode] = useState(false)
   const [assignInstallerId, setAssignInstallerId] = useState('')
   const [assignMsg, setAssignMsg] = useState('')
-  const fileInputRef = useRef(null)
   const syncTimer = useRef(null)
   const restoredRef = useRef(false)
   const obsRef = useRef(obs)
@@ -167,7 +165,7 @@ function InspectorApp({ session, profile, logout }) {
       if (cancelled) return
       setSiteMaps(rows)
       if (rows.length) setCurrentMapId(rows[0].id)
-      else setMapError('Ei karttaa tälle työmaalle')
+      else setMapError('Ei karttaa tälle työmaalle — pyydä Valvomoa lataamaan kartta Työmaat-välilehdeltä.')
     })
     return () => { cancelled = true }
   }, [currentSiteId]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -536,67 +534,19 @@ function InspectorApp({ session, profile, logout }) {
     }))
   }
 
-  // Uuden kartan lisäys (DXF/DWG = aurinkovoimalan elementtikartta, PDF/kuva
-  // = tavallinen pohjakuva/kerros — ks. HUOM state-määrittelyjen yhteydessä).
-  // PDF muunnetaan automaattisesti kuvaksi (ensimmäinen sivu) latauksen
-  // yhteydessä, käyttäjän ei tarvitse tehdä sitä itse.
-  async function handleAddMap(e) {
-    const file = e.target.files[0]
-    e.target.value = '' // sallii saman tiedoston valitsemisen uudelleen myöhemmin
-    if (!file) return
-    const suggested = siteMaps.length === 0 ? 'Kartta' : ''
-    const name = window.prompt('Kartan nimi (esim. "1. krs" tai "Aurinkovoimala"):', suggested)
-    if (name === null) return // peruttu
-    const finalName = name.trim() || 'Kartta'
-    const ext = (file.name.split('.').pop() || '').toLowerCase()
-    showSync('Ladataan karttaa...')
-    try {
-      let uploadBlob = file, storageExt, kind
-      if (ext === 'dxf' || ext === 'dwg') {
-        kind = 'dxf'; storageExt = 'dxf'
-        const text = await file.text()
-        if (!parseDXF(text)) { showSync('⚠ DXF-tiedostoa ei voitu lukea'); return }
-      } else if (ext === 'pdf') {
-        kind = 'image'; storageExt = 'png'
-        uploadBlob = await pdfFirstPageToPngBlob(file)
-        if (!uploadBlob) { showSync('⚠ PDF:n muuntaminen kuvaksi epäonnistui'); return }
-      } else if (['png', 'jpg', 'jpeg', 'webp'].includes(ext)) {
-        kind = 'image'; storageExt = ext
-      } else {
-        showSync('⚠ Tiedostomuotoa ei tueta (dxf/dwg/pdf/png/jpg)')
-        return
-      }
-      const newMapId = randomUUID()
-      const path = `${companyId}/${currentSiteId}/${newMapId}.${storageExt}`
-      const { error: upErr } = await sb.storage.from('maps').upload(path, uploadBlob, { upsert: true })
-      if (upErr) throw upErr
-      const { data: created, error: insErr } = await sb.from('site_maps')
-        .insert([{ id: newMapId, company_id: companyId, site_id: currentSiteId, name: finalName, kind, storage_path: path, sort_order: siteMaps.length }])
-        .select().single()
-      if (insErr) throw insErr
-      setSiteMaps(prev => [...prev, created])
-      setCurrentMapId(created.id)
-      showSync('✓ Kartta ladattu!')
-    } catch (err) {
-      console.error('Kartan lataus epäonnistui:', err)
-      showSync('⚠ Kartan lataus epäonnistui')
-    }
-  }
-
-  // Poistaa kartan (metatiedon + tiedoston Storagesta). Havainnot joiden
-  // pinni oli tällä kartalla säilyvät ennallaan Supabasessa (map_id nollautuu
-  // automaattisesti ON DELETE SET NULL -viittauksen ansiosta), mutta niiden
-  // sijaintia ei enää voi näyttää millään kartalla.
-  async function handleDeleteMap(mapId) {
-    const rec = siteMaps.find(m => m.id === mapId)
-    if (!rec) return
-    if (!window.confirm(`Poistetaanko kartta "${rec.name}"? Tällä kartalla olevien havaintojen sijainti katoaa (havainnot itse säilyvät).`)) return
-    try { await sb.storage.from('maps').remove([rec.storage_path]) } catch (e) { console.error('Kartan tiedoston poisto epäonnistui:', e) }
-    await sb.from('site_maps').delete().eq('id', mapId)
-    setSiteMaps(prev => {
-      const next = prev.filter(m => m.id !== mapId)
-      if (currentMapId === mapId) setCurrentMapId(next[0]?.id ?? null)
-      return next
+  // HUOM (siirretty Valvomoon): kartan LATAUS/POISTO tehdään nyt Valvomon
+  // Työmaat-välilehdeltä (Dashboard.jsx), koska pohjapiirustukset ovat
+  // tyypillisesti sähköpostissa/tietokoneella, ei kentällä käytettävässä
+  // puhelimessa. Tämä näkymä VAIN lukee/näyttää kartat ja antaa valita
+  // niiden väliltä (ks. karttavalitsin alempana JSX:ssä) — päivitä-nappi
+  // hakee tuoreen listan, jos Valvomo on lisännyt/poistanut kartan sillä
+  // aikaa kun tämä sivu on ollut auki.
+  function refreshSiteMaps() {
+    if (!currentSiteId) return
+    listSiteMaps(sb, companyId, currentSiteId).then(rows => {
+      setSiteMaps(rows)
+      if (rows.length && !rows.find(m => m.id === currentMapId)) setCurrentMapId(rows[0].id)
+      if (!rows.length) setMapError('Ei karttaa tälle työmaalle — pyydä Valvomoa lataamaan kartta Työmaat-välilehdeltä.')
     })
   }
 
@@ -999,27 +949,26 @@ function InspectorApp({ session, profile, logout }) {
           </button>
         </div>
 
-        {/* Kartan lataus, jos työmaalla ei ole yhtään karttaa vielä.
-            Hyväksyy DXF/DWG:n (aurinkovoimalan elementtikartta) LISÄKSI
-            PDF:n ja kuvatiedostot (tavallinen pohjapiirustus/kerros) —
-            PDF muunnetaan automaattisesti kuvaksi. */}
+        {/* Jos työmaalla ei ole yhtään karttaa vielä — kartan LATAUS tehdään
+            Valvomosta (Työmaat-välilehti), ei tässä. "🔄 Päivitä" hakee
+            tuoreen listan, jos Valvomo on juuri lisännyt kartan. */}
         {siteMaps.length === 0 && (
           <div style={{ margin: '12px 16px', padding: 16, background: '#fff', borderRadius: 12, border: '1.5px dashed #b0b8d8', textAlign: 'center' }}>
             <p style={{ fontSize: 13, color: '#6670a0', marginBottom: 10 }}>
               {mapError || 'Ladataan karttaa...'}
             </p>
-            <button onClick={() => fileInputRef.current.click()} style={{ background: '#1560c4', color: '#fff', border: 'none', borderRadius: 8, padding: '9px 20px', fontSize: 13, fontWeight: 700 }}>
-              📂 Lataa kartta tälle työmaalle (DXF/PDF/kuva)
+            <button onClick={refreshSiteMaps} style={{ background: '#1560c4', color: '#fff', border: 'none', borderRadius: 8, padding: '9px 20px', fontSize: 13, fontWeight: 700 }}>
+              🔄 Päivitä
             </button>
-            <input ref={fileInputRef} type="file" accept=".dxf,.dwg,.pdf,.png,.jpg,.jpeg,.webp" style={{ display: 'none' }} onChange={handleAddMap} />
           </div>
         )}
 
         {/* Karttavalitsin — näytetään aina kun työmaalla on vähintään yksi
             kartta, jotta useita karttoja (esim. aurinkovoimala-DXF JA
             pohjapiirustus, tai useampi kerros) voi vaihtaa pudotusvalikosta.
-            "+ Lisää kartta" -nappi on aina näkyvissä; roskakori poistaa
-            valittuna olevan kartan. */}
+            "🔄"-nappi hakee tuoreen karttalistan Valvomon mahdollisten
+            muutosten varalta (uusi/poistettu kartta sillä aikaa kun tämä
+            sivu on ollut auki). */}
         {siteMaps.length > 0 && (
           <div style={{ margin: '8px 16px 0', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
             {siteMaps.length > 1 && (
@@ -1027,15 +976,9 @@ function InspectorApp({ session, profile, logout }) {
                 {siteMaps.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
               </select>
             )}
-            <button onClick={() => fileInputRef.current.click()} style={{ background: 'none', border: 'none', fontSize: 11, color: '#6670a0' }}>
-              🗺 + Lisää kartta
+            <button onClick={refreshSiteMaps} title="Hae tuoreet kartat (jos Valvomo lisäsi/poisti juuri jonkin)" style={{ background: 'none', border: 'none', fontSize: 11, color: '#6670a0' }}>
+              🔄 Päivitä
             </button>
-            {currentMapId && (
-              <button onClick={() => handleDeleteMap(currentMapId)} title="Poista tämä kartta" style={{ background: 'none', border: 'none', fontSize: 11, color: '#d63030' }}>
-                🗑
-              </button>
-            )}
-            <input ref={fileInputRef} type="file" accept=".dxf,.dwg,.pdf,.png,.jpg,.jpeg,.webp" style={{ display: 'none' }} onChange={handleAddMap} />
           </div>
         )}
 
