@@ -93,7 +93,7 @@ export async function loadSiteMapContent(sb, rec) {
 // tuodaan dynaamisesti (await import) jotta se ei kasvata pääsovelluksen
 // alkuperäistä latauskokoa niille käyttäjille jotka eivät koskaan lataa
 // PDF-pohjakuvaa.
-export async function pdfFirstPageToPngBlob(file, maxDim = 4500) {
+export async function pdfFirstPageToPngBlob(file, maxDim = 7000) {
   const mod = await import('pdfjs-dist')
   const pdfjsLib = mod.default ?? mod
   pdfjsLib.GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.min.js', import.meta.url).href
