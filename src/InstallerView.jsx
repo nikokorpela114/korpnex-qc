@@ -528,7 +528,7 @@ function InstallerApp({ session, profile, logout }) {
                 <span style={{ fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 20, background: sevBg[o.sev], color: sevColor[o.sev] }}>{sevLabel}</span>
               </div>
               {o.note && <div style={{ padding: '8px 14px 0', fontSize: 13, color: '#333' }}>{o.note}</div>}
-              {o.site && <div style={{ padding: '4px 14px 0', fontSize: 11, color: '#9aa2c0' }}>{o.site}</div>}
+              {o.site && <div style={{ padding: '4px 14px 0', fontSize: 11, color: '#9aa2c0' }}>{o.site}{o.rivi ? ` · ${o.rivi}` : ''}</div>}
 
               {mapData && o.pin_x != null && (
                 <div style={{ padding: 12 }}>
