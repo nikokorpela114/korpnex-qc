@@ -1188,7 +1188,7 @@ function DashboardInner({ session, profile, logout }) {
                 <EmptyState text="Ei työmaita — luo yksi Työmaat-välilehdellä, jotta Päiväkirja voidaan avata sille." />
               </div>
             ) : (
-              <div style={{ height: 640, display: 'flex', flexDirection: 'column' }}>
+              <div style={{ height: 640, display: 'flex', flexDirection: 'column', position: 'relative' }}>
                 <Diary
                   session={session}
                   profile={profile}

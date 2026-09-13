@@ -359,7 +359,16 @@ function DiarySiteEntries({ siteId, siteLabel, session, canManage, myName, compa
         ))}
       </div>
 
-      <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, maxWidth: 480, margin: '0 auto', background: '#eef0f2', borderTop: '1px solid #d0d5e8', padding: '10px 14px env(safe-area-inset-bottom, 14px)', display: 'flex', gap: 8, zIndex: 20 }}>
+      {/* readOnly (Valvomo): tämä komponentti on upotettu Dashboard.jsx:n
+          kiinteän kokoiseen (480x640) korttiin, ei koko selainikkunaan —
+          "position: fixed" ohittaisi kortin rajat ja piirtäisi palkin/
+          modaalin koko työpöytänäytön levyiseksi/korkuiseksi, jättäen
+          rumasti taustan näkyviin kortin molemmin puolin (näytti "puhelin-
+          sovellukselta keskellä työpöytää"). "position: absolute" pysyy
+          Dashboardin position:relative-kortin sisällä. Mobiilisovelluksissa
+          (readOnly=false, App.jsx/InstallerView.jsx) Diary TÄYTTÄÄ koko
+          näytön, jolloin "fixed" ja "absolute" näyttävät identtisiltä. */}
+      <div style={{ position: readOnly ? 'absolute' : 'fixed', bottom: 0, left: 0, right: 0, maxWidth: 480, margin: '0 auto', background: '#eef0f2', borderTop: '1px solid #d0d5e8', padding: '10px 14px env(safe-area-inset-bottom, 14px)', display: 'flex', gap: 8, zIndex: 20 }}>
         {!readOnly && (
           <button onClick={openComposer} style={{ flex: 1.3, padding: 13, background: '#070b17', border: 'none', borderRadius: 8, color: '#fff', fontSize: 14, fontWeight: 700 }}>📷 Uusi merkintä</button>
         )}
@@ -371,7 +380,7 @@ function DiarySiteEntries({ siteId, siteLabel, session, canManage, myName, compa
       </div>
 
       {composerOpen && (
-        <div style={{ position: 'fixed', inset: 0, background: '#f4f6fb', zIndex: 100, display: 'flex', flexDirection: 'column', maxWidth: 480, margin: '0 auto' }}>
+        <div style={{ position: readOnly ? 'absolute' : 'fixed', inset: 0, background: '#f4f6fb', zIndex: 100, display: 'flex', flexDirection: 'column', maxWidth: 480, margin: '0 auto' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: 'env(safe-area-inset-top, 12px) 16px 12px', background: '#070b17' }}>
             <button onClick={() => setComposerOpen(false)} style={{ background: 'rgba(255,255,255,0.2)', border: 'none', color: '#fff', width: 32, height: 32, borderRadius: '50%', fontSize: 16 }}>✕</button>
             <span style={{ fontSize: 15, fontWeight: 700, color: '#fff' }}>Uusi merkintä</span>
@@ -411,7 +420,7 @@ function DiarySiteEntries({ siteId, siteLabel, session, canManage, myName, compa
       )}
 
       {pdfMode && (
-        <div style={{ position: 'fixed', inset: 0, background: '#f4f6fb', zIndex: 100, display: 'flex', flexDirection: 'column', maxWidth: 480, margin: '0 auto' }}>
+        <div style={{ position: readOnly ? 'absolute' : 'fixed', inset: 0, background: '#f4f6fb', zIndex: 100, display: 'flex', flexDirection: 'column', maxWidth: 480, margin: '0 auto' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: 'env(safe-area-inset-top, 12px) 16px 12px', background: '#070b17' }}>
             <button onClick={() => setPdfMode(false)} style={{ background: 'rgba(255,255,255,0.2)', border: 'none', color: '#fff', width: 32, height: 32, borderRadius: '50%', fontSize: 16 }}>✕</button>
             <span style={{ fontSize: 15, fontWeight: 700, color: '#fff' }}>PDF valmis</span>
