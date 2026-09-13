@@ -28,11 +28,16 @@ export default function App() {
   if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('valvomo')) {
     return <Dashboard />
   }
-  // Oletusnäkymä (ei query-parametria) = tarkastajan sovellus. Moniyritys-
-  // versiossa tämäkin vaatii oikean kirjautumisen — tarkastaja on samalla
-  // yrityksen admin-tili (samat tunnukset kuin Valvomoon).
+  // Oletusnäkymä (ei query-parametria) = työnjohtajan sovellus (rooli-koodi
+  // pysyy edelleen "tarkastaja" tietokannassa/koodissa, näyttönimi on
+  // "Työnjohtaja"). Moniyritys-versiossa tämäkin vaatii oikean kirjautumisen —
+  // rooli "tarkastaja" (oma, Valvomon luoma tili) TAI "admin" (Valvomon
+  // pääkäyttäjä pääsee tänne omalla tilillään myös itse, esim. testaamiseen
+  // tai omaan kentälläkäyntiin — mutta UUDET, Valvomon luomat työnjohtaja-
+  // tilit ovat aina erillisiä, henkilökohtaisia tilejä, eivät samoja
+  // tunnuksia kuin Valvomo).
   return (
-    <AuthGate allowedRoles={['admin']} title="Tarkastaja">
+    <AuthGate allowedRoles={['admin', 'tarkastaja']} title="Työnjohtaja">
       {({ session, profile, logout }) => <InspectorApp session={session} profile={profile} logout={logout} />}
     </AuthGate>
   )
@@ -58,7 +63,6 @@ function InspectorApp({ session, profile, logout }) {
   const [groupByCategory, setGroupByCategory] = useState(true) // oletuksena päällä: samat vikatyypit yhdistetään aina samaan karttakuvaan PDF:ssä
   const [isOnline, setIsOnline] = useState(typeof navigator === 'undefined' ? true : navigator.onLine)
   const [installers, setInstallers] = useState([])
-  const [teams, setTeams] = useState([])
   // Pikalisäys: kun tämä on asetettu jonkin havainnon id:hen, saman kartan
   // napautukset eivät enää siirrä TÄMÄN havainnon pinniä vaan luovat uuden,
   // samankaltaisen havainnon napautettuun kohtaan — kartta pysyy koko ajan
@@ -71,7 +75,6 @@ function InspectorApp({ session, profile, logout }) {
   const [quickAddCounts, setQuickAddCounts] = useState({})
   const [assignMode, setAssignMode] = useState(false)
   const [assignInstallerId, setAssignInstallerId] = useState('')
-  const [assignTeamId, setAssignTeamId] = useState('')
   const [assignMsg, setAssignMsg] = useState('')
   const fileInputRef = useRef(null)
   const syncTimer = useRef(null)
@@ -148,7 +151,6 @@ function InspectorApp({ session, profile, logout }) {
       local_id: o.id,
       status: o.status || 'avoin',
       assigned_installer_id: o.assignedInstallerId ?? null,
-      assigned_team_id: o.assignedTeamId ?? null,
       report_batch: o.reportBatch ?? null,
       company_id: companyId,
     }
@@ -275,61 +277,36 @@ function InspectorApp({ session, profile, logout }) {
     try { localStorage.removeItem(DRAFT_KEY) } catch {}
   }
 
-  // installers/teams tulevat automaattisesti RLS:n rajaamina omasta
-  // yrityksestä — uudet asentajat luodaan Valvomon Käyttäjät-välilehdellä
-  // (rooli: Asentaja) ja ilmestyvät tähän listaan ensimmäisen kirjautumisen
-  // jälkeen.
+  // installers tulevat automaattisesti RLS:n rajaamina omasta yrityksestä —
+  // uudet asentajat luodaan Valvomon Urakoitsijat- tai Käyttäjät-
+  // välilehdellä (rooli: Asentaja) ja ilmestyvät tähän listaan välittömästi
+  // (ei tarvitse odottaa ensimmäistä kirjautumista).
   useEffect(() => {
     sb.from('installers').select('*').order('name').then(({ data }) => { if (data) setInstallers(data) })
-    sb.from('teams').select('*').order('name').then(({ data }) => { if (data) setTeams(data) })
   }, [])
 
-  // Assigns every current observation either to one installer OR to a
-  // whole team (assignTeamId), tags them with a shared report_batch so the
-  // recipient(s) see them as one job, and pushes a real phone notification
-  // — to the single installer, or to every member of the chosen team.
+  // Assigns every current observation to one installer, tags them with a
+  // shared report_batch so the recipient sees them as one job, and pushes a
+  // real phone notification to that installer.
   async function assignAndNotify() {
-    const target = assignTeamId || assignInstallerId
-    if (!target || obs.length === 0) return
+    if (!assignInstallerId || obs.length === 0) return
     const reportBatch = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
     setAssignMsg('Lähetetään...')
 
-    if (assignTeamId) {
-      const team = teams.find(t => t.id === assignTeamId)
-      const members = installers.filter(i => i.team_id === assignTeamId)
-      const updated = obs.map(o => ({ ...o, assignedInstallerId: null, assignedTeamId: assignTeamId, status: 'avoin', reportBatch }))
-      setObs(updated)
-      await Promise.all(updated.map(o => saveObs(o, site, inspector, rivi)))
+    const installer = installers.find(i => i.id === assignInstallerId)
+    const updated = obs.map(o => ({ ...o, assignedInstallerId: assignInstallerId, status: 'avoin', reportBatch }))
+    setObs(updated)
+    await Promise.all(updated.map(o => saveObs(o, site, inspector, rivi)))
 
-      // Jokainen tiimin jäsen saa oman ilmoituksensa — kaikki näkevät saman
-      // tehtävälistan (InstallerView hakee tehtävät myös assigned_team_id:n
-      // perusteella, ei vain omalla installer_id:llään).
-      const results = await Promise.all(members.map(m => sendPushNotification({
-        role: 'installer',
-        installerId: m.id,
-        title: 'Uusi tarkistuslista',
-        body: `${updated.length} havaintoa — ${site}`,
-        url: '/?asentaja=1',
-        tag: reportBatch,
-      })))
-      const anySent = results.some(r => r?.sent > 0)
-      setAssignMsg(anySent ? `✓ Lähetetty tiimille ${team?.name || ''}` : '✓ Tallennettu (tiimin jäsenet eivät ehkä ole vielä ottaneet ilmoituksia käyttöön)')
-    } else {
-      const installer = installers.find(i => i.id === assignInstallerId)
-      const updated = obs.map(o => ({ ...o, assignedInstallerId: assignInstallerId, assignedTeamId: null, status: 'avoin', reportBatch }))
-      setObs(updated)
-      await Promise.all(updated.map(o => saveObs(o, site, inspector, rivi)))
-
-      const res = await sendPushNotification({
-        role: 'installer',
-        installerId: assignInstallerId,
-        title: 'Uusi tarkistuslista',
-        body: `${updated.length} havaintoa — ${site}`,
-        url: '/?asentaja=1',
-        tag: reportBatch,
-      })
-      setAssignMsg(res?.sent > 0 ? `✓ Lähetetty ${installer?.name || ''}` : '✓ Tallennettu (asentaja ei ehkä ole vielä ottanut ilmoituksia käyttöön)')
-    }
+    const res = await sendPushNotification({
+      role: 'installer',
+      installerId: assignInstallerId,
+      title: 'Uusi tarkistuslista',
+      body: `${updated.length} havaintoa — ${site}`,
+      url: '/?asentaja=1',
+      tag: reportBatch,
+    })
+    setAssignMsg(res?.sent > 0 ? `✓ Lähetetty ${installer?.name || ''}` : '✓ Tallennettu (asentaja ei ehkä ole vielä ottanut ilmoituksia käyttöön)')
     setTimeout(() => setAssignMsg(''), 4000)
   }
 
@@ -822,7 +799,7 @@ function InspectorApp({ session, profile, logout }) {
         {/* Meta — työmaa valitaan nyt yhteisestä valitsimesta yllä (tab-
             switcherin päällä), ei enää tässä erikseen. */}
         <div style={{ padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 8, background: '#fff', borderBottom: '1px solid #d0d5e8' }}>
-          <input style={inputStyle} placeholder="Tarkastaja" value={inspector} onChange={e => setInspector(e.target.value)} />
+          <input style={inputStyle} placeholder="Työnjohtaja" value={inspector} onChange={e => setInspector(e.target.value)} />
           <input style={inputStyle} placeholder="Rivi / alue (esim. A7-45)" value={rivi} onChange={e => setRivi(e.target.value)} />
           <button onClick={newReport} style={{ alignSelf: 'flex-end', background: 'none', border: 'none', fontSize: 11, color: '#6670a0', padding: '2px 0' }}>
             🔄 Uusi raportti
@@ -1040,29 +1017,19 @@ function InspectorApp({ session, profile, logout }) {
 
           {assignMode && (
             <div style={{ background: '#fff', border: '1px solid #d0d5e8', borderRadius: 10, padding: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <select value={assignInstallerId} onChange={e => { setAssignInstallerId(e.target.value); if (e.target.value) setAssignTeamId('') }} style={selectStyle}>
+              <select value={assignInstallerId} onChange={e => setAssignInstallerId(e.target.value)} style={selectStyle}>
                 <option value="">Valitse asentaja…</option>
                 {installers.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
               </select>
 
-              {teams.length > 0 && (
-                <>
-                  <div style={{ textAlign: 'center', fontSize: 11, color: '#9aa2c0' }}>— TAI —</div>
-                  <select value={assignTeamId} onChange={e => { setAssignTeamId(e.target.value); if (e.target.value) setAssignInstallerId('') }} style={selectStyle}>
-                    <option value="">Valitse tiimi…</option>
-                    {teams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-                  </select>
-                </>
-              )}
-
-              {installers.length === 0 && teams.length === 0 && (
+              {installers.length === 0 && (
                 <div style={{ fontSize: 11.5, color: '#9aa2c0' }}>
-                  Ei asentajia vielä — luo tili Valvomon Käyttäjät-välilehdellä (rooli: Asentaja).
+                  Ei asentajia vielä — luo tili Valvomon Urakoitsijat- tai Käyttäjät-välilehdellä (rooli: Asentaja).
                 </div>
               )}
 
-              <button onClick={assignAndNotify} disabled={(!assignInstallerId && !assignTeamId) || obs.length === 0}
-                style={{ padding: 12, background: (assignInstallerId || assignTeamId) ? '#1a8a50' : '#c8cce0', border: 'none', borderRadius: 8, color: '#fff', fontWeight: 700, fontSize: 14 }}>
+              <button onClick={assignAndNotify} disabled={!assignInstallerId || obs.length === 0}
+                style={{ padding: 12, background: assignInstallerId ? '#1a8a50' : '#c8cce0', border: 'none', borderRadius: 8, color: '#fff', fontWeight: 700, fontSize: 14 }}>
                 📤 Lähetä {obs.length === 1 ? '1 havainto' : `${obs.length} havaintoa`}
               </button>
               {assignMsg && <div style={{ fontSize: 12, color: '#1a8a50', textAlign: 'center' }}>{assignMsg}</div>}

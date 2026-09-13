@@ -99,9 +99,10 @@ function InstallerApp({ session, profile, logout }) {
   }
 
   // Varmistaa että kirjautuneella auth-käyttäjällä on installers-rivi jonka
-  // id = auth.uid(). Vanhoilla nimi+PIN-ajan riveillä ei ollut mitään
-  // yhteyttä oikeisiin Auth-tileihin, niin uusi rivi luodaan aina
-  // ensimmäisellä kirjautumisella (ja säilyy sen jälkeen ennallaan).
+  // id = auth.uid(). Valvomon Käyttäjät-/Urakoitsijat-välilehdellä luotu
+  // asentaja-tili saa tämän rivin JO käyttäjän luontihetkellä (ks.
+  // manage-company-users-funktio) — tämä on siis enää varotoimi vanhoille
+  // tileille tai jos rivin luonti käyttäjän luontihetkellä epäonnistui.
   useEffect(() => {
     let cancelled = false
     ;(async () => {

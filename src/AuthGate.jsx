@@ -44,7 +44,7 @@ export async function describeFnError(error, data) {
   return error?.message || 'Tuntematon virhe'
 }
 
-const ROLE_LABEL = { admin: 'Ylläpitäjä', asentaja: 'Asentaja' }
+const ROLE_LABEL = { admin: 'Ylläpitäjä', asentaja: 'Asentaja', tarkastaja: 'Työnjohtaja' }
 
 function Shell({ children }) {
   return (

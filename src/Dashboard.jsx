@@ -1,7 +1,18 @@
 // src/Dashboard.jsx
 // Työnjohtajan "valvomo" — työpöytäkäyttöön tarkoitettu yleiskatsaus siitä
-// kuka (henkilö tai tiimi) on korjaamassa mitä, mikä on auki, mikä korjattu.
+// kuka on korjaamassa mitä, mikä on auki, mikä korjattu.
 // Avataan osoitteesta /?valvomo (sama reititysperiaate kuin /?asentaja).
+//
+// HUOM: "Tiimit"-käsite on poistettu kokonaan (oli aiemmin kolmas taso
+// Urakoitsija → Tiimi → Asentaja — koettiin sekavaksi). Nyt on vain kaksi
+// tasoa: Urakoitsija → Työntekijä (asentaja tai tarkastaja). Käyttäjän
+// luonti (sähköposti+salasana+rooli) tapahtuu suoraan Urakoitsijat-
+// välilehdellä kunkin urakoitsijan kohdalla ("+ Lisää työntekijä"), TAI
+// yleisesti Käyttäjät-välilehdellä (jos työntekijä ei kuulu mihinkään
+// urakoitsijaan, esim. oma henkilökunta). Kumpikin kutsuu samaa
+// manage-company-users-funktiota, joka luo tunnuksen ja — jos rooli on
+// "asentaja" — myös installers-rivin heti valmiiksi oikealla
+// urakoitsija_id:llä (ei tarvitse odottaa ensimmäistä kirjautumista).
 import React, { useState, useEffect, useMemo, useCallback } from 'react'
 import { sb } from './supabaseClient.js'
 import AuthGate, { describeFnError } from './AuthGate.jsx'
@@ -10,7 +21,7 @@ import Diary from './Diary.jsx'
 const sevColor = { Kriittinen: '#b02828', Huomio: '#a06800', Info: '#1a7a45' }
 const sevBg = { Kriittinen: '#fde2e2', Huomio: '#fdf0d5', Info: '#dcefe3' }
 const REFRESH_MS = 30000
-const ROLE_LABEL = { admin: 'Ylläpitäjä', asentaja: 'Asentaja' }
+const ROLE_LABEL = { admin: 'Ylläpitäjä', asentaja: 'Asentaja', tarkastaja: 'Työnjohtaja' }
 
 // Valvomon kirjautuminen hoidetaan jaetulla AuthGate-komponentilla
 // (src/AuthGate.jsx) — sama komponentti hoitaa myös asentaja-näkymän
@@ -34,17 +45,14 @@ function DashboardInner({ session, profile, logout }) {
   const [newSiteLabel, setNewSiteLabel] = useState('')
   const [obs, setObs] = useState([])
   const [installers, setInstallers] = useState([])
-  const [teams, setTeams] = useState([])
   const [contractors, setContractors] = useState([])
   const [loading, setLoading] = useState(true)
   const [lastRefresh, setLastRefresh] = useState(null)
   const [siteFilter, setSiteFilter] = useState('')
-  const [teamFilter, setTeamFilter] = useState('')
   const [search, setSearch] = useState('')
-  const [tab, setTab] = useState('open') // 'open' | 'fixed' | 'hidden' | 'nearmiss' | 'teams' | 'contractors' | 'sites' | 'users' | 'diary'
+  const [tab, setTab] = useState('open') // 'open' | 'fixed' | 'hidden' | 'nearmiss' | 'contractors' | 'sites' | 'users' | 'diary'
   const [selected, setSelected] = useState(new Set())
   const [busy, setBusy] = useState(false)
-  const [newTeamName, setNewTeamName] = useState('')
   const [lightboxSrc, setLightboxSrc] = useState(null) // korjauskuvan suurennettu näkymä
 
   // --- Päiväkirja-välilehden tila (työmaa = päiväkirjan "projekti", ks. Diary.jsx) ---
@@ -53,6 +61,15 @@ function DashboardInner({ session, profile, logout }) {
   // --- Urakoitsijat-välilehden tila ---
   const [newContractorName, setNewContractorName] = useState('')
   const [selectedContractorId, setSelectedContractorId] = useState('')
+  // "+ Lisää työntekijä" -lomake tietyn urakoitsijakortin sisällä — samat
+  // kentät kuin Käyttäjät-välilehdellä, mutta urakoitsija on tässä valmiiksi
+  // lukittu kyseiseen korttiin.
+  const [addEmpContractorId, setAddEmpContractorId] = useState('')
+  const [addEmpEmail, setAddEmpEmail] = useState('')
+  const [addEmpPassword, setAddEmpPassword] = useState('')
+  const [addEmpRole, setAddEmpRole] = useState('asentaja')
+  const [addEmpErr, setAddEmpErr] = useState('')
+  const [addEmpBusy, setAddEmpBusy] = useState(false)
 
   // --- Käyttäjät-välilehden tila (yrityksen omat sähköposti+salasana-tunnukset) ---
   const [companyUsers, setCompanyUsers] = useState([])
@@ -61,29 +78,27 @@ function DashboardInner({ session, profile, logout }) {
   const [newUserEmail, setNewUserEmail] = useState('')
   const [newUserPassword, setNewUserPassword] = useState('')
   const [newUserRole, setNewUserRole] = useState('asentaja')
+  const [newUserContractorId, setNewUserContractorId] = useState('')
 
   const load = useCallback(async () => {
     const [
-      { data: o, error: oErr }, { data: i, error: iErr }, { data: tm, error: tErr },
+      { data: o, error: oErr }, { data: i, error: iErr },
       { data: co, error: cErr },
       { data: st, error: stErr }, { data: cmp, error: cmpErr },
     ] = await Promise.all([
       sb.from('observations').select('*').order('created_at', { ascending: false }).limit(3000),
       sb.from('installers').select('*').order('name'),
-      sb.from('teams').select('*').order('name'),
       sb.from('contractors').select('*').order('name'),
       sb.from('sites').select('*').order('label'),
       sb.from('companies').select('*').eq('id', companyId).maybeSingle(),
     ])
     if (oErr) console.error('Dashboard: observations fetch failed', oErr)
     if (iErr) console.error('Dashboard: installers fetch failed', iErr)
-    if (tErr) console.error('Dashboard: teams fetch failed', tErr)
     if (cErr) console.error('Dashboard: contractors fetch failed', cErr)
     if (stErr) console.error('Dashboard: sites fetch failed', stErr)
     if (cmpErr) console.error('Dashboard: company fetch failed', cmpErr)
     setObs(o || [])
     setInstallers(i || [])
-    setTeams(tm || [])
     setContractors(co || [])
     setSites(st || [])
     setCompany(cmp || null)
@@ -101,60 +116,37 @@ function DashboardInner({ session, profile, logout }) {
   const installerById = useMemo(() => {
     const m = new Map(); installers.forEach(i => m.set(i.id, i)); return m
   }, [installers])
-  const teamById = useMemo(() => {
-    const m = new Map(); teams.forEach(t => m.set(t.id, t)); return m
-  }, [teams])
   const contractorById = useMemo(() => {
     const m = new Map(); contractors.forEach(c => m.set(c.id, c)); return m
   }, [contractors])
 
-  // Ryhmittelyavain jokaiselle havainnolle: tiimi (jos asentaja kuuluu
-  // tiimiin, tai havainto on osoitettu suoraan tiimille), muuten
-  // yksittäinen asentaja, muuten "ei lähetetty kenellekään".
+  // Ryhmittelyavain jokaiselle havainnolle: asentaja jolle se on osoitettu,
+  // muuten "ei lähetetty kenellekään".
   const groupInfo = useCallback(o => {
-    if (o.assigned_team_id) return { key: 'team:' + o.assigned_team_id, team: teamById.get(o.assigned_team_id), installer: null }
     if (o.assigned_installer_id) {
-      const inst = installerById.get(o.assigned_installer_id)
-      if (inst?.team_id) return { key: 'team:' + inst.team_id, team: teamById.get(inst.team_id), installer: inst }
-      return { key: 'inst:' + o.assigned_installer_id, team: null, installer: inst }
+      return { key: 'inst:' + o.assigned_installer_id, installer: installerById.get(o.assigned_installer_id) }
     }
-    return { key: '__unassigned', team: null, installer: null }
-  }, [installerById, teamById])
+    return { key: '__unassigned', installer: null }
+  }, [installerById])
 
-  // Urakoitsija-taso: tiimi tai asentaja "kuuluu" urakoitsijaan (contractor_id),
-  // ja havainto perii sen sen mukaan kenelle se on osoitettu. Jos havainto on
-  // osoitettu tiimille, tiimin oma urakoitsija ratkaisee; jos yksittäiselle
-  // asentajalle, käytetään ensin hänen tiiminsä urakoitsijaa (jos tiimillä on
-  // sellainen), sitten asentajan omaa urakoitsijaa.
+  // Urakoitsija-taso: asentaja "kuuluu" urakoitsijaan (installers.contractor_id),
+  // ja havainto perii sen sen mukaan kenelle se on osoitettu.
   const contractorIdOf = useCallback(o => {
-    if (o.assigned_team_id) return teamById.get(o.assigned_team_id)?.contractor_id || null
-    if (o.assigned_installer_id) {
-      const inst = installerById.get(o.assigned_installer_id)
-      if (!inst) return null
-      if (inst.team_id) {
-        const teamContractor = teamById.get(inst.team_id)?.contractor_id
-        if (teamContractor) return teamContractor
-      }
-      return inst.contractor_id || null
-    }
+    if (o.assigned_installer_id) return installerById.get(o.assigned_installer_id)?.contractor_id || null
     return null
-  }, [installerById, teamById])
+  }, [installerById])
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
     return obs.filter(o => {
       if (siteFilter && o.site !== siteFilter) return false
-      if (teamFilter) {
-        const g = groupInfo(o)
-        if (g.key !== 'team:' + teamFilter) return false
-      }
       if (q) {
         const hay = `${o.cat || ''} ${o.note || ''} ${o.rivi || ''} ${o.inspector || ''}`.toLowerCase()
         if (!hay.includes(q)) return false
       }
       return true
     })
-  }, [obs, siteFilter, teamFilter, search, groupInfo])
+  }, [obs, siteFilter, search])
 
   // Läheltäpiti-ilmoituksilla (type = 'laheltapiti') ei ole korjausseurantaa,
   // niin ne pidetään erillään "Avoimet"/"Korjatut"-vikalistoista omassa
@@ -232,21 +224,6 @@ function DashboardInner({ session, profile, logout }) {
     clearSelection(); setBusy(false); load()
   }
 
-  async function createTeam() {
-    const name = newTeamName.trim()
-    if (!name) return
-    const { error } = await sb.from('teams').insert([{ name, company_id: companyId }])
-    if (error) { alert('Tiimin luonti epäonnistui: ' + error.message); return }
-    setNewTeamName('')
-    load()
-  }
-  async function deleteTeam(id) {
-    if (!window.confirm('Poistetaanko tiimi? Jäsenet jäävät ilman tiimiä, eivät poistu.')) return
-    const { error } = await sb.from('teams').delete().eq('id', id)
-    if (error) { alert('Poisto epäonnistui: ' + error.message); return }
-    load()
-  }
-
   // --- Yrityksen nimi ---
   async function saveCompanyName() {
     const name = companyNameInput.trim()
@@ -283,7 +260,7 @@ function DashboardInner({ session, profile, logout }) {
     load()
   }
   async function deleteContractor(id) {
-    if (!window.confirm('Poistetaanko urakoitsija? Sille liitetyt tiimit/asentajat jäävät ilman urakoitsijaa, eivät poistu.')) return
+    if (!window.confirm('Poistetaanko urakoitsija? Sille liitetyt asentajat jäävät ilman urakoitsijaa, eivät poistu.')) return
     if (selectedContractorId === id) setSelectedContractorId('')
     const { error } = await sb.from('contractors').delete().eq('id', id)
     if (error) { alert('Poisto epäonnistui: ' + error.message); return }
@@ -291,12 +268,6 @@ function DashboardInner({ session, profile, logout }) {
   }
   async function setInstallerContractor(installerId, contractorId) {
     const { data, error } = await sb.from('installers').update({ contractor_id: contractorId || null }).eq('id', installerId).select()
-    if (error) { alert('Tallennus epäonnistui: ' + error.message); return }
-    if (!data || data.length === 0) { alert('Tallennus ei muuttanut mitään — tarkista RLS-oikeudet.'); return }
-    load()
-  }
-  async function setTeamContractor(teamId, contractorId) {
-    const { data, error } = await sb.from('teams').update({ contractor_id: contractorId || null }).eq('id', teamId).select()
     if (error) { alert('Tallennus epäonnistui: ' + error.message); return }
     if (!data || data.length === 0) { alert('Tallennus ei muuttanut mitään — tarkista RLS-oikeudet.'); return }
     load()
@@ -319,10 +290,27 @@ function DashboardInner({ session, profile, logout }) {
     const emailVal = newUserEmail.trim(), pwVal = newUserPassword
     if (!emailVal || pwVal.length < 6) { setUserErr('Anna sähköposti ja vähintään 6 merkin salasana.'); return }
     setUserErr('')
-    const { data, error } = await sb.functions.invoke('manage-company-users', { body: { action: 'create', email: emailVal, password: pwVal, role: newUserRole } })
+    const { data, error } = await sb.functions.invoke('manage-company-users', { body: { action: 'create', email: emailVal, password: pwVal, role: newUserRole, contractor_id: newUserContractorId || null } })
     if (error || data?.error) { setUserErr(await describeFnError(error, data)); return }
-    setNewUserEmail(''); setNewUserPassword('')
-    loadUsers()
+    setNewUserEmail(''); setNewUserPassword(''); setNewUserContractorId('')
+    loadUsers(); load()
+  }
+
+  // --- "+ Lisää työntekijä" -lomake urakoitsijakortin sisällä (Urakoitsijat-
+  // välilehti) — sama toiminto kuin createUser, mutta urakoitsija on
+  // valmiiksi lukittu kyseiseen korttiin. Vain "asentaja"-roolille
+  // urakoitsija todella tallentuu (ks. manage-company-users) — tarkastaja-
+  // tili luodaan yhtä lailla, mutta sitä ei liitetä urakoitsijaan, koska
+  // urakoitsija on nimenomaan asentajia toimittavan aliurakoitsijan käsite.
+  async function createUserForContractor(contractorId) {
+    const emailVal = addEmpEmail.trim(), pwVal = addEmpPassword
+    if (!emailVal || pwVal.length < 6) { setAddEmpErr('Anna sähköposti ja vähintään 6 merkin salasana.'); return }
+    setAddEmpErr(''); setAddEmpBusy(true)
+    const { data, error } = await sb.functions.invoke('manage-company-users', { body: { action: 'create', email: emailVal, password: pwVal, role: addEmpRole, contractor_id: contractorId } })
+    setAddEmpBusy(false)
+    if (error || data?.error) { setAddEmpErr(await describeFnError(error, data)); return }
+    setAddEmpEmail(''); setAddEmpPassword(''); setAddEmpRole('asentaja'); setAddEmpContractorId('')
+    loadUsers(); load()
   }
   async function deleteUser(u) {
     if (!window.confirm(`Poistetaanko käyttäjä ${u.email}? Hän ei pääse enää kirjautumaan.`)) return
@@ -330,16 +318,6 @@ function DashboardInner({ session, profile, logout }) {
     const { data, error } = await sb.functions.invoke('manage-company-users', { body: { action: 'delete', user_id: u.id } })
     if (error || data?.error) { setUserErr(await describeFnError(error, data)); return }
     loadUsers()
-  }
-
-  async function setInstallerTeam(installerId, teamId) {
-    const { data, error } = await sb.from('installers').update({ team_id: teamId || null }).eq('id', installerId).select()
-    if (error) { alert('Tallennus epäonnistui: ' + error.message); return }
-    if (!data || data.length === 0) {
-      alert('Tallennus ei muuttanut mitään — todennäköisesti Row Level Security estää päivityksen. Aja teams_rls_fix.sql Supabasen SQL Editorissa.')
-      return
-    }
-    load()
   }
 
   async function deleteInstaller(installer) {
@@ -412,7 +390,6 @@ function DashboardInner({ session, profile, logout }) {
           <SummaryCard label="Joista kriittisiä" value={totalCritical} color="#b02828" />
           <SummaryCard label="Korjattu" value={fixedObs.length} color="#1a8a50" />
           <SummaryCard label="Asentajia" value={installers.length} color="#6670a0" />
-          <SummaryCard label="Tiimejä" value={teams.length} color="#8a5fc9" />
           <SummaryCard label="Läheltäpiti" value={nearMissObs.length} color="#a06800" />
           <SummaryCard label="Urakoitsijoita" value={contractors.length} color="#1560c4" />
           <SummaryCard label="Työmaita" value={sites.length} color="#0e8fe0" />
@@ -424,12 +401,8 @@ function DashboardInner({ session, profile, logout }) {
             <option value="">Kaikki työmaat</option>
             {sites.map(s => <option key={s.id} value={s.label}>{s.label}</option>)}
           </select>
-          <select value={teamFilter} onChange={e => setTeamFilter(e.target.value)} style={selectStyle}>
-            <option value="">Kaikki tiimit</option>
-            {teams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-          </select>
           <input
-            placeholder="Hae (vikatyyppi, rivi, tarkastaja)…"
+            placeholder="Hae (vikatyyppi, rivi, työnjohtaja)…"
             value={search}
             onChange={e => setSearch(e.target.value)}
             style={{ ...selectStyle, flex: 1, minWidth: 220 }}
@@ -439,7 +412,6 @@ function DashboardInner({ session, profile, logout }) {
             <TabButton active={tab === 'fixed'} onClick={() => { setTab('fixed'); clearSelection() }}>Korjatut ({fixedObs.length})</TabButton>
             <TabButton active={tab === 'nearmiss'} onClick={() => { setTab('nearmiss'); clearSelection() }}>Läheltäpiti ({nearMissObs.length})</TabButton>
             <TabButton active={tab === 'hidden'} onClick={() => { setTab('hidden'); clearSelection() }}>Piilotetut ({hiddenObs.length})</TabButton>
-            <TabButton active={tab === 'teams'} onClick={() => { setTab('teams'); clearSelection() }}>Tiimit</TabButton>
             <TabButton active={tab === 'contractors'} onClick={() => { setTab('contractors'); clearSelection() }}>Urakoitsijat</TabButton>
             <TabButton active={tab === 'sites'} onClick={() => { setTab('sites'); clearSelection() }}>Työmaat</TabButton>
             <TabButton active={tab === 'users'} onClick={() => { setTab('users'); clearSelection(); loadUsers() }}>Käyttäjät</TabButton>
@@ -448,7 +420,7 @@ function DashboardInner({ session, profile, logout }) {
         </div>
 
         {/* Massatoimintopalkki */}
-        {selected.size > 0 && tab !== 'teams' && tab !== 'diary' && tab !== 'contractors' && tab !== 'users' && tab !== 'sites' && (
+        {selected.size > 0 && tab !== 'diary' && tab !== 'contractors' && tab !== 'users' && tab !== 'sites' && (
           <div style={{ position: 'sticky', top: 12, zIndex: 10, background: '#fff', border: '1px solid #d0d5e8', borderRadius: 12, padding: '10px 16px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 12, boxShadow: '0 4px 16px rgba(20,30,80,0.10)' }}>
             <span style={{ fontSize: 13, fontWeight: 700, color: '#0d1a6e' }}>{selected.size} valittu</span>
             <div style={{ flex: 1 }} />
@@ -468,8 +440,8 @@ function DashboardInner({ session, profile, logout }) {
               .sort((a, b) => b.items.length - a.items.length)
               .map(g => {
                 const critCount = g.items.filter(o => o.sev === 'Kriittinen').length
-                const title = g.team ? `🧑‍🤝‍🧑 ${g.team.name}` : g.installer ? `👷 ${g.installer.name}` : '📋 Ei lähetetty kenellekään'
-                const headerBg = g.team ? '#f1ecfb' : g.installer ? '#eef0f7' : '#fdf0d5'
+                const title = g.installer ? `👷 ${g.installer.name}` : '📋 Ei lähetetty kenellekään'
+                const headerBg = g.installer ? '#eef0f7' : '#fdf0d5'
                 const allSelected = g.items.length > 0 && g.items.every(o => selected.has(o.id))
                 return (
                   <div key={g.key} style={cardStyle}>
@@ -479,11 +451,6 @@ function DashboardInner({ session, profile, logout }) {
                         {g.items.length} kpl{critCount > 0 ? ` · ${critCount} kriitt.` : ''}
                       </span>
                     </div>
-                    {g.team && g.team.name && (
-                      <div style={{ padding: '6px 16px', fontSize: 11, color: '#8a5fc9', background: '#faf8ff', borderBottom: '1px solid #f0f1f7' }}>
-                        {installers.filter(i => i.team_id === g.team.id).map(i => i.name).join(', ') || 'Ei jäseniä'}
-                      </div>
-                    )}
                     <label style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '7px 16px', fontSize: 12, color: '#6670a0', borderBottom: '1px solid #f0f1f7', cursor: 'pointer', userSelect: 'none' }}>
                       <input type="checkbox" checked={allSelected} onChange={() => toggleSelectGroup(g.items)} />
                       {allSelected ? 'Poista kaikki valinnat' : 'Valitse kaikki'}
@@ -599,55 +566,6 @@ function DashboardInner({ session, profile, logout }) {
           </div>
         )}
 
-        {tab === 'teams' && (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 16 }}>
-            <div style={{ ...cardStyle, padding: 18 }}>
-              <div style={{ fontWeight: 700, fontSize: 14, color: '#0d1a6e', marginBottom: 10 }}>+ Uusi tiimi</div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <input
-                  placeholder="Tiimin nimi (esim. Tiimi 1)"
-                  value={newTeamName}
-                  onChange={e => setNewTeamName(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && createTeam()}
-                  style={{ ...selectStyle, flex: 1 }}
-                />
-                <button onClick={createTeam} style={{ background: '#1560c4', color: '#fff', border: 'none', borderRadius: 8, padding: '9px 16px', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>Luo</button>
-              </div>
-            </div>
-
-            {teams.map(team => (
-              <TeamCard
-                key={team.id}
-                team={team}
-                installers={installers}
-                onDeleteTeam={deleteTeam}
-                onSetInstallerTeam={setInstallerTeam}
-              />
-            ))}
-
-            <div style={{ ...cardStyle, padding: 20, gridColumn: '1 / -1' }}>
-              <div style={{ fontWeight: 700, fontSize: 15, color: '#0d1a6e', marginBottom: 14 }}>Kaikki asentajat</div>
-              {installers.length === 0 && <div style={{ fontSize: 13, color: '#9aa2c0', marginBottom: 10 }}>Ei asentajia vielä</div>}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '4px 24px' }}>
-                {installers.map(i => (
-                  <div key={i.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '9px 0', borderBottom: '1px solid #f4f5fa', gap: 10 }}>
-                    <span style={{ fontSize: 14, flex: 1, minWidth: 0 }}>{i.name}</span>
-                    <select value={i.team_id || ''} onChange={e => setInstallerTeam(i.id, e.target.value || null)} style={{ ...selectStyle, padding: '6px 10px', fontSize: 12.5 }}>
-                    <option value="">Ei tiimiä</option>
-                    {teams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-                    </select>
-                    <button onClick={() => deleteInstaller(i)} title="Poista asentaja" style={{ background: 'none', border: 'none', color: '#b02828', fontSize: 15, cursor: 'pointer', padding: '2px 4px' }}>🗑️</button>
-                  </div>
-                ))}
-              </div>
-
-              <div style={{ fontSize: 12, color: '#9aa2c0', marginTop: 18, lineHeight: 1.5 }}>
-                Uudet asentajat luodaan <b>Käyttäjät</b>-välilehdellä (rooli: Asentaja) — he ilmestyvät tähän listaan automaattisesti heti kun he kirjautuvat ensimmäistä kertaa omalla sähköposti+salasana-tilillään.
-              </div>
-            </div>
-          </div>
-        )}
-
         {tab === 'contractors' && (
           <div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16, marginBottom: 20 }}>
@@ -682,12 +600,53 @@ function DashboardInner({ session, profile, logout }) {
                       <button
                         onClick={() => setSelectedContractorId(active ? '' : c.id)}
                         style={{
-                          width: '100%', padding: 9, borderRadius: 8, border: 'none', fontSize: 12.5, fontWeight: 700, cursor: 'pointer',
+                          width: '100%', padding: 9, borderRadius: 8, border: 'none', fontSize: 12.5, fontWeight: 700, cursor: 'pointer', marginBottom: 8,
                           background: active ? '#1560c4' : '#eef0f7', color: active ? '#fff' : '#1560c4',
                         }}
                       >
                         {active ? '✓ Näytetään data alla' : 'Näytä data'}
                       </button>
+                      <button
+                        onClick={() => {
+                          const opening = addEmpContractorId !== c.id
+                          setAddEmpContractorId(opening ? c.id : '')
+                          setAddEmpErr('')
+                          if (opening) { setAddEmpEmail(''); setAddEmpPassword(''); setAddEmpRole('asentaja') }
+                        }}
+                        style={{ width: '100%', padding: 9, borderRadius: 8, border: '1px dashed #b0b8d8', background: 'none', fontSize: 12.5, fontWeight: 700, cursor: 'pointer', color: '#1560c4' }}
+                      >
+                        {addEmpContractorId === c.id ? '✕ Peruuta' : '+ Lisää työntekijä'}
+                      </button>
+                      {addEmpContractorId === c.id && (
+                        <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid #eef0f7', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                          <input
+                            type="email" placeholder="Sähköposti" value={addEmpEmail}
+                            onChange={e => setAddEmpEmail(e.target.value)}
+                            style={{ ...selectStyle, padding: '7px 10px', fontSize: 12.5 }}
+                          />
+                          <input
+                            type="text" placeholder="Väliaikainen salasana (väh. 6 merkkiä)" value={addEmpPassword}
+                            onChange={e => setAddEmpPassword(e.target.value)}
+                            style={{ ...selectStyle, padding: '7px 10px', fontSize: 12.5 }}
+                          />
+                          <select value={addEmpRole} onChange={e => setAddEmpRole(e.target.value)} style={{ ...selectStyle, padding: '7px 10px', fontSize: 12.5 }}>
+                            <option value="asentaja">Asentaja</option>
+                            <option value="tarkastaja">Työnjohtaja</option>
+                          </select>
+                          {addEmpRole === 'tarkastaja' && (
+                            <div style={{ fontSize: 11, color: '#9aa2c0', lineHeight: 1.4 }}>
+                              Huom: työnjohtaja-tiliä ei liitetä urakoitsijaan (urakoitsija koskee vain asentajia, jotka voivat saada korjattavia vikoja).
+                            </div>
+                          )}
+                          {addEmpErr && <div style={{ color: '#d63030', fontSize: 12 }}>{addEmpErr}</div>}
+                          <button
+                            onClick={() => createUserForContractor(c.id)} disabled={addEmpBusy}
+                            style={{ background: '#1560c4', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 14px', fontSize: 12.5, fontWeight: 700, cursor: 'pointer', opacity: addEmpBusy ? 0.6 : 1 }}
+                          >
+                            {addEmpBusy ? 'Luodaan…' : 'Luo tili'}
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </div>
                 )
@@ -733,41 +692,22 @@ function DashboardInner({ session, profile, logout }) {
               )
             })()}
 
-            {/* Urakoitsija-liitosten hallinta: kaikki tiimit ja asentajat, valitse urakoitsija kummallekin */}
+            {/* Kaikki asentajat yhdessä listassa — vaihda urakoitsijaa jälkikäteen tai poista tili */}
             <div style={{ ...cardStyle, padding: 20 }}>
-              <div style={{ fontWeight: 700, fontSize: 15, color: '#0d1a6e', marginBottom: 14 }}>Tiimien ja asentajien urakoitsijat</div>
-              <div style={{ fontSize: 11, fontWeight: 700, color: '#9aa2c0', marginBottom: 8, textTransform: 'uppercase' }}>Tiimit</div>
-              {teams.length === 0 && <div style={{ fontSize: 13, color: '#9aa2c0', marginBottom: 10 }}>Ei tiimejä vielä</div>}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '4px 24px', marginBottom: 18 }}>
-                {teams.map(t => (
-                  <div key={t.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '9px 0', borderBottom: '1px solid #f4f5fa', gap: 10 }}>
-                    <span style={{ fontSize: 14, flex: 1, minWidth: 0 }}>🧑‍🤝‍🧑 {t.name}</span>
-                    <select value={t.contractor_id || ''} onChange={e => setTeamContractor(t.id, e.target.value || null)} style={{ ...selectStyle, padding: '6px 10px', fontSize: 12.5 }}>
-                      <option value="">Ei urakoitsijaa</option>
-                      {contractors.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                    </select>
-                  </div>
-                ))}
-              </div>
-
-              <div style={{ fontSize: 11, fontWeight: 700, color: '#9aa2c0', marginBottom: 8, textTransform: 'uppercase' }}>Asentajat</div>
-              {installers.length === 0 && <div style={{ fontSize: 13, color: '#9aa2c0', marginBottom: 10 }}>Ei asentajia vielä</div>}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '4px 24px' }}>
+              <div style={{ fontWeight: 700, fontSize: 15, color: '#0d1a6e', marginBottom: 14 }}>Kaikki asentajat</div>
+              {installers.length === 0 && <div style={{ fontSize: 13, color: '#9aa2c0', marginBottom: 10 }}>Ei asentajia vielä — lisää ylläolevien urakoitsijakorttien "+ Lisää työntekijä" -painikkeella, tai Käyttäjät-välilehdellä.</div>}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '4px 24px' }}>
                 {installers.map(i => (
                   <div key={i.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '9px 0', borderBottom: '1px solid #f4f5fa', gap: 10 }}>
-                    <span style={{ fontSize: 14, flex: 1, minWidth: 0 }}>👷 {i.name}{i.team_id ? ` (${teamById.get(i.team_id)?.name || 'tiimi'})` : ''}</span>
+                    <span style={{ fontSize: 14, flex: 1, minWidth: 0 }}>👷 {i.name}</span>
                     <select value={i.contractor_id || ''} onChange={e => setInstallerContractor(i.id, e.target.value || null)} style={{ ...selectStyle, padding: '6px 10px', fontSize: 12.5 }}>
                       <option value="">Ei urakoitsijaa</option>
                       {contractors.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                     </select>
+                    <button onClick={() => deleteInstaller(i)} title="Poista asentaja" style={{ background: 'none', border: 'none', color: '#b02828', fontSize: 15, cursor: 'pointer', padding: '2px 4px' }}>🗑️</button>
                   </div>
                 ))}
               </div>
-              {teams.some(t => t.contractor_id) && (
-                <div style={{ fontSize: 11.5, color: '#9aa2c0', marginTop: 14 }}>
-                  Huom: jos asentaja kuuluu tiimiin JA tiimillä on urakoitsija, tiimin urakoitsija ratkaisee sen havainnot — asentajan oma urakoitsija-valinta vaikuttaa vain silloin kun havainto on osoitettu hänelle henkilökohtaisesti eikä hänen tiimilleen.
-                </div>
-              )}
             </div>
           </div>
         )}
@@ -798,7 +738,7 @@ function DashboardInner({ session, profile, logout }) {
                 </div>
               ))}
               <div style={{ fontSize: 11.5, color: '#9aa2c0', marginTop: 14 }}>
-                Työmaan kartta (DXF) ladataan tarkastajan näkymässä (?tarkastaja) työmaan valinnan yhteydessä.
+                Työmaan kartta (DXF) ladataan työnjohtajan näkymässä (oletusnäkymä) työmaan valinnan yhteydessä.
               </div>
             </div>
           </div>
@@ -809,7 +749,7 @@ function DashboardInner({ session, profile, logout }) {
             <div style={{ ...cardStyle, padding: 18 }}>
               <div style={{ fontWeight: 700, fontSize: 14, color: '#0d1a6e', marginBottom: 10 }}>+ Uusi käyttäjä</div>
               <div style={{ fontSize: 12, color: '#6670a0', marginBottom: 10 }}>
-                Luo tunnus toiselle yrityksesi käyttäjälle (työnjohtaja tai asentaja) — hän voi kirjautua näillä tiedoilla heti (ei vaadi sähköpostin vahvistusta).
+                Luo tunnus toiselle yrityksesi käyttäjälle (työnjohtaja, asentaja tai toinen ylläpitäjä) — hän voi kirjautua näillä tiedoilla heti (ei vaadi sähköpostin vahvistusta). Jokainen kirjautuu jatkossa omalla, henkilökohtaisella sähköposti+salasana-tilillään — Valvomon oma tili ei toimi kenenkään muun tilinä.
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <input
@@ -826,14 +766,21 @@ function DashboardInner({ session, profile, logout }) {
                 />
                 <select value={newUserRole} onChange={e => setNewUserRole(e.target.value)} style={selectStyle}>
                   <option value="asentaja">Asentaja</option>
+                  <option value="tarkastaja">Työnjohtaja</option>
                   <option value="admin">Ylläpitäjä (Valvomo)</option>
                 </select>
+                {newUserRole === 'asentaja' && (
+                  <select value={newUserContractorId} onChange={e => setNewUserContractorId(e.target.value)} style={selectStyle}>
+                    <option value="">Ei urakoitsijaa (omaa henkilökuntaa)</option>
+                    {contractors.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                )}
                 {userErr && <div style={{ color: '#d63030', fontSize: 12.5 }}>{userErr}</div>}
                 <button onClick={createUser} style={{ background: '#1560c4', color: '#fff', border: 'none', borderRadius: 8, padding: '9px 16px', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
                   Luo käyttäjä
                 </button>
                 <div style={{ fontSize: 11, color: '#9aa2c0' }}>
-                  Käyttäjä voi itse vaihtaa tämän salasanan kirjautumissivun "Unohtuiko salasana?" -linkistä. Asentaja-tilit ilmestyvät Tiimit-välilehdelle automaattisesti kun he kirjautuvat ensimmäistä kertaa.
+                  Käyttäjä voi itse vaihtaa tämän salasanan kirjautumissivun "Unohtuiko salasana?" -linkistä. Asentaja-tilit ilmestyvät Urakoitsijat-välilehden asentajalistaan välittömästi, ei vasta ensimmäisen kirjautumisen jälkeen.
                 </div>
               </div>
             </div>
@@ -918,51 +865,6 @@ function DashboardInner({ session, profile, logout }) {
           >✕</button>
         </div>
       )}
-    </div>
-  )
-}
-
-function TeamCard({ team, installers, onDeleteTeam, onSetInstallerTeam }) {
-  const [addId, setAddId] = useState('')
-  const members = installers.filter(i => i.team_id === team.id)
-  const available = installers.filter(i => i.team_id !== team.id)
-
-  function addMember() {
-    if (!addId) return
-    onSetInstallerTeam(addId, team.id)
-    setAddId('')
-  }
-
-  return (
-    <div style={cardStyle}>
-      <div style={{ padding: '13px 16px', background: '#f1ecfb', borderBottom: '1px solid #e4e7f3', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <span style={{ fontWeight: 700, fontSize: 14, color: '#0d1a6e' }}>🧑‍🤝‍🧑 {team.name}</span>
-        <button onClick={() => onDeleteTeam(team.id)} style={{ background: 'none', border: 'none', color: '#b02828', fontSize: 12, cursor: 'pointer' }}>Poista tiimi</button>
-      </div>
-      <div style={{ padding: 14 }}>
-        <div style={{ fontSize: 11, fontWeight: 700, color: '#9aa2c0', marginBottom: 8, textTransform: 'uppercase' }}>Jäsenet ({members.length})</div>
-        {members.length === 0 && <div style={{ fontSize: 13, color: '#9aa2c0', marginBottom: 8 }}>Ei jäseniä vielä</div>}
-        {members.map(m => (
-          <div key={m.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid #f4f5fa' }}>
-            <span style={{ fontSize: 13 }}>{m.name}</span>
-            <button onClick={() => onSetInstallerTeam(m.id, null)} style={{ background: 'none', border: 'none', color: '#9aa2c0', fontSize: 12, cursor: 'pointer' }}>Poista tiimistä</button>
-          </div>
-        ))}
-
-        {available.length > 0 ? (
-          <div style={{ display: 'flex', gap: 6, marginTop: 12 }}>
-            <select value={addId} onChange={e => setAddId(e.target.value)} style={{ ...selectStyle, flex: 1, padding: '7px 10px', fontSize: 12.5 }}>
-              <option value="">+ Lisää jäsen…</option>
-              {available.map(i => <option key={i.id} value={i.id}>{i.name}{i.team_id ? ' (vaihda tiimistä)' : ''}</option>)}
-            </select>
-            <button onClick={addMember} disabled={!addId} style={{ background: addId ? '#1560c4' : '#c8cce0', color: '#fff', border: 'none', borderRadius: 8, padding: '7px 14px', fontSize: 12.5, fontWeight: 700, cursor: addId ? 'pointer' : 'default' }}>
-              Lisää
-            </button>
-          </div>
-        ) : (
-          <div style={{ fontSize: 12, color: '#c0c4d8', marginTop: 12 }}>Kaikki asentajat ovat jo tässä tiimissä</div>
-        )}
-      </div>
     </div>
   )
 }
